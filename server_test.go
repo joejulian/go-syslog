@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joejulian/go-syslog/v2/format"
 	. "gopkg.in/check.v1"
-	"gopkg.in/mcuadros/go-syslog.v2/format"
 )
 
 func Test(t *testing.T) { TestingT(t) }
@@ -55,12 +55,20 @@ type HandlerMock struct {
 	LastLogParts      format.LogParts
 	LastMessageLength int64
 	LastError         error
+	Called            chan struct{}
 }
 
 func (s *HandlerMock) Handle(logParts format.LogParts, msgLen int64, err error) {
 	s.LastLogParts = logParts
 	s.LastMessageLength = msgLen
 	s.LastError = err
+	if s.Called != nil {
+		select {
+		case <-s.Called:
+		default:
+			close(s.Called)
+		}
+	}
 }
 
 type ConnMock struct {
