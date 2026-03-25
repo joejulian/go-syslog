@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,12 +57,16 @@ type HandlerMock struct {
 	LastMessageLength int64
 	LastError         error
 	Called            chan struct{}
+	OnHandle          func(format.LogParts, int64, error)
 }
 
 func (s *HandlerMock) Handle(logParts format.LogParts, msgLen int64, err error) {
 	s.LastLogParts = logParts
 	s.LastMessageLength = msgLen
 	s.LastError = err
+	if s.OnHandle != nil {
+		s.OnHandle(logParts, msgLen, err)
+	}
 	if s.Called != nil {
 		select {
 		case <-s.Called:
@@ -279,6 +284,59 @@ func (s *ServerSuite) TestUDPAutomatic3164Plus6587OctetCount(c *C) {
 	c.Check(handler.LastLogParts["content"], Equals, "content")
 	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslog)))
 	c.Check(handler.LastError, IsNil)
+}
+
+func (s *ServerSuite) TestKillWithInflightDatagrams(c *C) {
+	handler := new(HandlerMock)
+	server := NewServer()
+	server.SetFormat(RFC3164)
+	server.SetHandler(handler)
+	server.SetDatagramChannelSize(0)
+	err := server.ListenUDP("127.0.0.1:0")
+	c.Assert(err, IsNil)
+
+	var killOnce sync.Once
+	killErr := make(chan error, 1)
+	handler.OnHandle = func(logParts format.LogParts, msgLen int64, err error) {
+		killOnce.Do(func() {
+			time.Sleep(50 * time.Millisecond)
+			killErr <- server.Kill()
+		})
+	}
+
+	server.Boot()
+
+	serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
+	c.Assert(err, IsNil)
+	con, err := net.DialUDP("udp", nil, serverAddr)
+	c.Assert(err, IsNil)
+	defer con.Close()
+
+	_, err = con.Write([]byte(exampleSyslog))
+	c.Assert(err, IsNil)
+	_, err = con.Write([]byte(exampleSyslog))
+	c.Assert(err, IsNil)
+
+	done := make(chan struct{})
+	go func() {
+		server.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for UDP shutdown")
+	}
+
+	select {
+	case err = <-killErr:
+		c.Assert(err, IsNil)
+	default:
+		c.Fatal("Kill() was not triggered by the handler")
+	}
+
+	c.Assert(handler.LastLogParts["hostname"], Equals, "hostname")
 }
 
 func (s *ServerSuite) TestUDPAutomatic5424Plus6587OctetCount(c *C) {
