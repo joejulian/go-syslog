@@ -2,11 +2,12 @@ package rfc5424
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
-	. "gopkg.in/check.v1"
 	"github.com/joejulian/go-syslog/v2/internal/syslogparser"
+	. "gopkg.in/check.v1"
 )
 
 // Hooks up gocheck into the gotest runner.
@@ -246,6 +247,26 @@ func (s *Rfc5424TestSuite) TestParseHeader_Valid(c *C) {
 		c.Assert(obtained, Equals, expected[i])
 		c.Assert(p.cursor, Equals, len(f))
 	}
+}
+
+func (s *Rfc5424TestSuite) TestParseHeader_InvalidProcID(c *C) {
+	procID := strings.Repeat("1", 129)
+	buff := []byte(fmt.Sprintf("<165>1 2003-10-11T22:14:15.003Z mymachine.example.com su %s ID47 ", procID))
+
+	p := NewParser(buff)
+	_, err := p.parseHeader()
+
+	c.Assert(err, Equals, ErrInvalidProcId)
+}
+
+func (s *Rfc5424TestSuite) TestParseHeader_InvalidMsgID(c *C) {
+	msgID := strings.Repeat("1", 33)
+	buff := []byte(fmt.Sprintf("<165>1 2003-10-11T22:14:15.003Z mymachine.example.com su 123 %s ", msgID))
+
+	p := NewParser(buff)
+	_, err := p.parseHeader()
+
+	c.Assert(err, Equals, ErrInvalidMsgId)
 }
 
 func (s *Rfc5424TestSuite) TestParseTimestamp_UTC(c *C) {

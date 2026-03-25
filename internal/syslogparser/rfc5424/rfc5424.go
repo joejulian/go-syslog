@@ -164,7 +164,7 @@ func (p *Parser) parseHeader() (header, error) {
 
 	procId, err := p.parseProcId()
 	if err != nil {
-		return hdr, nil
+		return hdr, err
 	}
 
 	hdr.procId = procId
@@ -172,7 +172,7 @@ func (p *Parser) parseHeader() (header, error) {
 
 	msgId, err := p.parseMsgId()
 	if err != nil {
-		return hdr, nil
+		return hdr, err
 	}
 
 	hdr.msgId = msgId
