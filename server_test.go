@@ -14,6 +14,30 @@ import (
 
 func Test(t *testing.T) { TestingT(t) }
 
+type noopHandler struct{}
+
+func (noopHandler) Handle(format.LogParts, int64, error) {}
+
+func TestConcurrentLastErrorAccess(t *testing.T) {
+	server := NewServer()
+	server.SetFormat(RFC5424)
+	server.SetHandler(noopHandler{})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			server.parser([]byte("<34>1 not-a-timestamp host app proc msg -"), "127.0.0.1", "")
+		}()
+		go func() {
+			defer wg.Done()
+			_ = server.GetLastError()
+		}()
+	}
+	wg.Wait()
+}
+
 type ServerSuite struct {
 }
 
@@ -24,25 +48,32 @@ var exampleSyslogNoPriority = "Dec 26 05:08:46 hostname test with no priority - 
 var exampleRFC5424Syslog = "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8"
 
 func (s *ServerSuite) TestTailFile(c *C) {
-	handler := new(HandlerMock)
+	handled := make(chan struct{})
+	handler := &HandlerMock{Called: handled}
 	server := NewServer()
 	server.SetFormat(RFC3164)
 	server.SetHandler(handler)
-	server.ListenUDP("0.0.0.0:5141")
-	server.ListenTCP("0.0.0.0:5141")
-
-	go func(server *Server) {
-		time.Sleep(100 * time.Millisecond)
-
-		serverAddr, _ := net.ResolveUDPAddr("udp", "localhost:5141")
-		con, _ := net.DialUDP("udp", nil, serverAddr)
-		con.Write([]byte(exampleSyslog))
-		time.Sleep(100 * time.Millisecond)
-
-		server.Kill()
-	}(server)
+	err := server.ListenUDP("127.0.0.1:0")
+	c.Assert(err, IsNil)
 
 	server.Boot()
+	serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
+	c.Assert(err, IsNil)
+	con, err := net.DialUDP("udp", nil, serverAddr)
+	c.Assert(err, IsNil)
+	defer con.Close()
+
+	_, err = con.Write([]byte(exampleSyslog))
+	c.Assert(err, IsNil)
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		c.Fatal("timeout waiting for UDP log message")
+	}
+
+	err = server.Kill()
+	c.Assert(err, IsNil)
 	server.Wait()
 
 	c.Check(handler.LastLogParts["hostname"], Equals, "hostname")

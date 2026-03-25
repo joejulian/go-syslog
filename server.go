@@ -39,6 +39,7 @@ type Server struct {
 	format                  format.Format
 	handler                 Handler
 	lastError               error
+	lastErrorMu             sync.RWMutex
 	readTimeoutMilliseconds int64
 	tlsPeerNameFunc         TlsPeerNameFunc
 	datagramPool            sync.Pool
@@ -270,7 +271,9 @@ func (s *Server) parser(line []byte, client string, tlsPeer string) {
 	parser := s.format.GetParser(line)
 	err := parser.Parse()
 	if err != nil {
+		s.lastErrorMu.Lock()
 		s.lastError = err
+		s.lastErrorMu.Unlock()
 	}
 
 	logParts := parser.Dump()
@@ -289,6 +292,8 @@ func (s *Server) parser(line []byte, client string, tlsPeer string) {
 
 // Returns the last error
 func (s *Server) GetLastError() error {
+	s.lastErrorMu.RLock()
+	defer s.lastErrorMu.RUnlock()
 	return s.lastError
 }
 
