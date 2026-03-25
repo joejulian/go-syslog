@@ -532,9 +532,6 @@ func toNSec(sec float64) (int, error) {
 // ------------------------------------------------
 
 func parseStructuredData(buff []byte, cursor *int, l int) (string, error) {
-	var sdData string
-	var found bool
-
 	if *cursor >= l {
 		return "-", nil
 	}
@@ -545,35 +542,43 @@ func parseStructuredData(buff []byte, cursor *int, l int) (string, error) {
 	}
 
 	if buff[*cursor] != '[' {
-		return sdData, ErrNoStructuredData
+		return "", ErrNoStructuredData
 	}
 
 	from := *cursor
-	to := from
-
-	for to = from; to < l; to++ {
-		if found {
-			break
+	for {
+		if *cursor >= l || buff[*cursor] != '[' {
+			return "", ErrNoStructuredData
 		}
+		*cursor++
 
-		b := buff[to]
-
-		if b == ']' {
-			switch t := to + 1; {
-			case t == l:
-				found = true
-			case t <= l && buff[t] == ' ':
-				found = true
+		for *cursor < l {
+			switch buff[*cursor] {
+			case '\\':
+				*cursor++
+				if *cursor >= l {
+					return "", ErrNoStructuredData
+				}
+			case ']':
+				*cursor++
+				switch {
+				case *cursor == l:
+					return string(buff[from:*cursor]), nil
+				case buff[*cursor] == '[':
+					goto nextElement
+				case buff[*cursor] == ' ':
+					return string(buff[from:*cursor]), nil
+				default:
+					return "", ErrNoStructuredData
+				}
 			}
+			*cursor++
 		}
-	}
 
-	if found {
-		*cursor = to
-		return string(buff[from:to]), nil
-	}
+		return "", ErrNoStructuredData
 
-	return sdData, ErrNoStructuredData
+	nextElement:
+	}
 }
 
 func parseUpToLen(buff []byte, cursor *int, l int, maxLen int, e error) (string, error) {
