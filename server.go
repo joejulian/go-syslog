@@ -51,7 +51,8 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{tlsPeerNameFunc: defaultTlsPeerName, datagramPool: sync.Pool{
 		New: func() interface{} {
-			return make([]byte, 65536)
+			buf := make([]byte, 65536)
+			return &buf
 		},
 	},
 
@@ -109,7 +110,10 @@ func (s *Server) ListenUDP(addr string) error {
 	if err != nil {
 		return err
 	}
-	connection.SetReadBuffer(datagramReadBufferSize)
+	if err := connection.SetReadBuffer(datagramReadBufferSize); err != nil {
+		connection.Close()
+		return err
+	}
 
 	s.connections = append(s.connections, connection)
 	return nil
@@ -126,7 +130,10 @@ func (s *Server) ListenUnixgram(addr string) error {
 	if err != nil {
 		return err
 	}
-	connection.SetReadBuffer(datagramReadBufferSize)
+	if err := connection.SetReadBuffer(datagramReadBufferSize); err != nil {
+		connection.Close()
+		return err
+	}
 
 	s.connections = append(s.connections, connection)
 	return nil
@@ -246,8 +253,7 @@ func (s *Server) goScanConnection(connection net.Conn) {
 		}
 	}
 
-	var scanCloser *ScanCloser
-	scanCloser = &ScanCloser{scanner, connection}
+	scanCloser := &ScanCloser{scanner, connection}
 
 	s.wait.Add(1)
 	go s.scan(scanCloser, client, tlsPeer)
@@ -262,7 +268,10 @@ loop:
 		default:
 		}
 		if s.readTimeoutMilliseconds > 0 {
-			scanCloser.closer.SetReadDeadline(time.Now().Add(time.Duration(s.readTimeoutMilliseconds) * time.Millisecond))
+			if err := scanCloser.closer.SetReadDeadline(time.Now().Add(time.Duration(s.readTimeoutMilliseconds) * time.Millisecond)); err != nil {
+				s.emitParseFailure(nil, client, tlsPeer, err)
+				break loop
+			}
 		}
 		if scanCloser.Scan() {
 			s.parser([]byte(scanCloser.Text()), client, tlsPeer)
@@ -324,7 +333,7 @@ func (s *Server) emitParseFailure(line []byte, client string, tlsPeer string, er
 }
 
 func isIgnorableScanError(err error) bool {
-	if netErr, ok := err.(net.Error); ok && (netErr.Timeout() || netErr.Temporary()) {
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		return true
 	}
 
@@ -387,7 +396,8 @@ func (s *Server) goReceiveDatagrams(packetconn net.PacketConn) {
 		defer s.wait.Done()
 		defer s.datagramReaders.Done()
 		for {
-			buf := s.datagramPool.Get().([]byte)
+			bufPtr := s.datagramPool.Get().(*[]byte)
+			buf := *bufPtr
 			n, addr, err := packetconn.ReadFrom(buf)
 			if err == nil {
 				// Ignore trailing control characters and NULs
@@ -399,13 +409,19 @@ func (s *Server) goReceiveDatagrams(packetconn net.PacketConn) {
 						address = addr.String()
 					}
 					s.datagramChannel <- DatagramMessage{buf[:n], address}
+				} else {
+					s.datagramPool.Put(bufPtr)
 				}
 			} else {
+				s.datagramPool.Put(bufPtr)
 				// there has been an error. Either the server has been killed
 				// or may be getting a transitory error due to (e.g.) the
 				// interface being shutdown in which case sleep() to avoid busy wait.
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
 				opError, ok := err.(*net.OpError)
-				if (ok) && !opError.Temporary() && !opError.Timeout() {
+				if (ok) && !opError.Timeout() {
 					return
 				}
 				time.Sleep(10 * time.Millisecond)
@@ -420,21 +436,15 @@ func (s *Server) goParseDatagrams() {
 	s.wait.Add(1)
 	go func() {
 		defer s.wait.Done()
-		for {
-			select {
-			case msg, ok := (<-s.datagramChannel):
-				if !ok {
-					return
+		for msg := range s.datagramChannel {
+			if sf := s.format.GetSplitFunc(); sf != nil {
+				if _, token, err := sf(msg.message, true); err == nil {
+					s.parser(token, msg.client, "")
 				}
-				if sf := s.format.GetSplitFunc(); sf != nil {
-					if _, token, err := sf(msg.message, true); err == nil {
-						s.parser(token, msg.client, "")
-					}
-				} else {
-					s.parser(msg.message, msg.client, "")
-				}
-				s.datagramPool.Put(msg.message[:cap(msg.message)])
+			} else {
+				s.parser(msg.message, msg.client, "")
 			}
+			s.datagramPool.Put(&msg.message)
 		}
 	}()
 }

@@ -51,7 +51,11 @@ func (p *Parser) Parse() error {
 	pri, err := p.parsePriority()
 	if err != nil {
 		// RFC3164 sec 4.3.3
-		p.priority = syslogparser.Priority{13, syslogparser.Facility{Value: 1}, syslogparser.Severity{Value: 5}}
+		p.priority = syslogparser.Priority{
+			P: 13,
+			F: syslogparser.Facility{Value: 1},
+			S: syslogparser.Severity{Value: 5},
+		}
 		p.priorityInferred = true
 		p.cursor = tcursor
 		content, err := p.parseContent()
@@ -267,7 +271,6 @@ func (p *Parser) parseTag() (string, error) {
 		if endOfTag {
 			if !found {
 				tag = p.buff[from:p.cursor]
-				found = true
 			}
 
 			p.cursor++

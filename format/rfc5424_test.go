@@ -1,10 +1,13 @@
 package format
 
 import (
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func (s *FormatSuite) TestRFC5424_SingleSplit(c *C) {
-	f := RFC5424{}
-	c.Assert(f.GetSplitFunc(), IsNil)
-}
+var _ = Describe("RFC5424", func() {
+	It("does not provide a split function", func() {
+		f := RFC5424{}
+		Expect(f.GetSplitFunc()).To(BeNil())
+	})
+})

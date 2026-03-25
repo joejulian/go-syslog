@@ -1,21 +1,21 @@
 package syslog
 
 import (
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/joejulian/go-syslog/v2/format"
 )
 
-type HandlerSuite struct{}
+var _ = Describe("ChannelHandler", func() {
+	It("writes log parts to the provided channel", func() {
+		logPart := format.LogParts{"tag": "foo"}
 
-var _ = Suite(&HandlerSuite{})
+		channel := make(LogPartsChannel, 1)
+		handler := NewChannelHandler(channel)
+		handler.Handle(logPart, 10, nil)
 
-func (s *HandlerSuite) TestHandle(c *C) {
-	logPart := format.LogParts{"tag": "foo"}
-
-	channel := make(LogPartsChannel, 1)
-	handler := NewChannelHandler(channel)
-	handler.Handle(logPart, 10, nil)
-
-	fromChan := <-channel
-	c.Check(fromChan["tag"], Equals, logPart["tag"])
-}
+		fromChan := <-channel
+		Expect(fromChan["tag"]).To(Equal(logPart["tag"]))
+	})
+})

@@ -1,64 +1,59 @@
 package format
 
 import (
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func (s *FormatSuite) TestRFC3164_SingleSplit(c *C) {
-	f := RFC3164{}
-	c.Assert(f.GetSplitFunc(), IsNil)
-}
+var _ = Describe("RFC3164", func() {
+	It("does not provide a split function", func() {
+		f := RFC3164{}
+		Expect(f.GetSplitFunc()).To(BeNil())
+	})
 
-func (s *FormatSuite) TestRFC3164_CorrectParsingTypical(c *C) {
-	f := RFC3164{}
+	It("parses a typical message", func() {
+		f := RFC3164{}
 
-	find := `<13>May  1 20:51:40 myhostname myprogram: ciao`
-	parser := f.GetParser([]byte(find))
-	err := parser.Parse()
-	c.Assert(err, IsNil)
-	c.Assert(parser.Dump()["content"], Equals, "ciao")
-	c.Assert(parser.Dump()["hostname"], Equals, "myhostname")
-	c.Assert(parser.Dump()["tag"], Equals, "myprogram")
+		line := `<13>May  1 20:51:40 myhostname myprogram: ciao`
+		parser := f.GetParser([]byte(line))
+		err := parser.Parse()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parser.Dump()["content"]).To(Equal("ciao"))
+		Expect(parser.Dump()["hostname"]).To(Equal("myhostname"))
+		Expect(parser.Dump()["tag"]).To(Equal("myprogram"))
+	})
 
-}
-func (s *FormatSuite) TestRFC3164_CorrectParsingTypicalWithPID(c *C) {
-	f := RFC3164{}
+	It("parses a typical message with a pid", func() {
+		f := RFC3164{}
 
-	find := `<13>May  1 20:51:40 myhostname myprogram[42]: ciao`
-	parser := f.GetParser([]byte(find))
-	err := parser.Parse()
-	c.Assert(err, IsNil)
-	c.Assert(parser.Dump()["content"], Equals, "ciao")
-	c.Assert(parser.Dump()["hostname"], Equals, "myhostname")
-	c.Assert(parser.Dump()["tag"], Equals, "myprogram")
+		line := `<13>May  1 20:51:40 myhostname myprogram[42]: ciao`
+		parser := f.GetParser([]byte(line))
+		err := parser.Parse()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parser.Dump()["content"]).To(Equal("ciao"))
+		Expect(parser.Dump()["hostname"]).To(Equal("myhostname"))
+		Expect(parser.Dump()["tag"]).To(Equal("myprogram"))
+	})
 
-}
+	It("parses the GNU syslog variant without a hostname", func() {
+		f := RFC3164{}
 
-func (s *FormatSuite) TestRFC3164_CorrectParsingGNU(c *C) {
-	// GNU implementation of syslog() has a variant: hostname is missing
-	f := RFC3164{}
+		line := `<13>May  1 20:51:40 myprogram: ciao`
+		parser := f.GetParser([]byte(line))
+		err := parser.Parse()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parser.Dump()["content"]).To(Equal("ciao"))
+		Expect(parser.Dump()["tag"]).To(Equal("myprogram"))
+	})
 
-	find := `<13>May  1 20:51:40 myprogram: ciao`
-	parser := f.GetParser([]byte(find))
-	err := parser.Parse()
-	c.Assert(err, IsNil)
-	c.Assert(parser.Dump()["content"], Equals, "ciao")
-	// c.Assert(parser.Dump()["hostname"], Equals, "myhostname")
-	c.Assert(parser.Dump()["tag"], Equals, "myprogram")
+	It("parses the journald variant without a hostname", func() {
+		f := RFC3164{}
 
-}
-
-func (s *FormatSuite) TestRFC3164_CorrectParsingJournald(c *C) {
-	// GNU implementation of syslog() has a variant: hostname is missing
-	// systemd uses it, and typically also passes PID
-	f := RFC3164{}
-
-	find := `<78>May  1 20:51:02 myprog[153]: blah`
-	parser := f.GetParser([]byte(find))
-	err := parser.Parse()
-	c.Assert(err, IsNil)
-	c.Assert(parser.Dump()["content"], Equals, "blah")
-	// c.Assert(parser.Dump()["hostname"], Equals, "myhostname")
-	c.Assert(parser.Dump()["tag"], Equals, "myprog")
-
-}
+		line := `<78>May  1 20:51:02 myprog[153]: blah`
+		parser := f.GetParser([]byte(line))
+		err := parser.Parse()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(parser.Dump()["content"]).To(Equal("blah"))
+		Expect(parser.Dump()["tag"]).To(Equal("myprog"))
+	})
+})

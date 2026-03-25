@@ -6,482 +6,460 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/joejulian/go-syslog/v2/format"
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
-
-func Test(t *testing.T) { TestingT(t) }
 
 type noopHandler struct{}
 
 func (noopHandler) Handle(format.LogParts, int64, error) {}
 
-func TestConcurrentLastErrorAccess(t *testing.T) {
-	server := NewServer()
-	server.SetFormat(RFC5424)
-	server.SetHandler(noopHandler{})
+type handlerMock struct {
+	lastLogParts      format.LogParts
+	lastMessageLength int64
+	lastError         error
+	called            chan struct{}
+	onHandle          func(format.LogParts, int64, error)
+}
 
-	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			server.parser([]byte("<34>1 not-a-timestamp host app proc msg -"), "127.0.0.1", "")
-		}()
-		go func() {
-			defer wg.Done()
-			_ = server.GetLastError()
-		}()
+func (h *handlerMock) Handle(logParts format.LogParts, msgLen int64, err error) {
+	h.lastLogParts = logParts
+	h.lastMessageLength = msgLen
+	h.lastError = err
+	if h.onHandle != nil {
+		h.onHandle(logParts, msgLen, err)
 	}
-	wg.Wait()
-}
-
-type ServerSuite struct {
-}
-
-var _ = Suite(&ServerSuite{})
-var exampleSyslog = "<31>Dec 26 05:08:46 hostname tag[296]: content"
-var exampleSyslogNoTSTagHost = "<14>INFO     leaving (1) step postscripts"
-var exampleSyslogNoPriority = "Dec 26 05:08:46 hostname test with no priority - see rfc 3164 section 4.3.3"
-var exampleRFC5424Syslog = "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8"
-var malformedRFC5424Syslog = "<34>1 not-a-timestamp mymachine.example.com su - ID47 - malformed timestamp"
-
-func (s *ServerSuite) TestTailFile(c *C) {
-	handled := make(chan struct{})
-	handler := &HandlerMock{Called: handled}
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	err := server.ListenUDP("127.0.0.1:0")
-	c.Assert(err, IsNil)
-
-	server.Boot()
-	serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
-	c.Assert(err, IsNil)
-	con, err := net.DialUDP("udp", nil, serverAddr)
-	c.Assert(err, IsNil)
-	defer con.Close()
-
-	_, err = con.Write([]byte(exampleSyslog))
-	c.Assert(err, IsNil)
-
-	select {
-	case <-handled:
-	case <-time.After(2 * time.Second):
-		c.Fatal("timeout waiting for UDP log message")
-	}
-
-	err = server.Kill()
-	c.Assert(err, IsNil)
-	server.Wait()
-
-	c.Check(handler.LastLogParts["hostname"], Equals, "hostname")
-	c.Check(handler.LastLogParts["tag"], Equals, "tag")
-	c.Check(handler.LastLogParts["content"], Equals, "content")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-type HandlerMock struct {
-	LastLogParts      format.LogParts
-	LastMessageLength int64
-	LastError         error
-	Called            chan struct{}
-	OnHandle          func(format.LogParts, int64, error)
-}
-
-func (s *HandlerMock) Handle(logParts format.LogParts, msgLen int64, err error) {
-	s.LastLogParts = logParts
-	s.LastMessageLength = msgLen
-	s.LastError = err
-	if s.OnHandle != nil {
-		s.OnHandle(logParts, msgLen, err)
-	}
-	if s.Called != nil {
+	if h.called != nil {
 		select {
-		case <-s.Called:
+		case <-h.called:
 		default:
-			close(s.Called)
+			close(h.called)
 		}
 	}
 }
 
-type ConnMock struct {
-	ReadData       []byte
-	ReturnTimeout  bool
+type connMock struct {
+	readData       []byte
+	returnTimeout  bool
 	isClosed       bool
 	isReadDeadline bool
 }
 
-func (c *ConnMock) Read(b []byte) (n int, err error) {
-	if c.ReturnTimeout {
+func (c *connMock) Read(b []byte) (n int, err error) {
+	if c.returnTimeout {
 		return 0, net.UnknownNetworkError("i/o timeout")
 	}
-	if c.ReadData != nil {
-		l := copy(b, c.ReadData)
-		c.ReadData = c.ReadData[l:]
-		if len(c.ReadData) == 0 {
-			c.ReadData = nil
+	if c.readData != nil {
+		l := copy(b, c.readData)
+		c.readData = c.readData[l:]
+		if len(c.readData) == 0 {
+			c.readData = nil
 		}
 		return l, nil
 	}
 	return 0, io.EOF
 }
 
-func (c *ConnMock) Write(b []byte) (n int, err error) {
-	return 0, nil
-}
-
-func (c *ConnMock) Close() error {
-	c.isClosed = true
+func (c *connMock) Write([]byte) (n int, err error) { return 0, nil }
+func (c *connMock) Close() error                    { c.isClosed = true; return nil }
+func (c *connMock) LocalAddr() net.Addr             { return nil }
+func (c *connMock) RemoteAddr() net.Addr            { return nil }
+func (c *connMock) SetDeadline(time.Time) error     { return nil }
+func (c *connMock) SetReadDeadline(time.Time) error { c.isReadDeadline = true; return nil }
+func (c *connMock) SetWriteDeadline(time.Time) error {
 	return nil
 }
 
-func (c *ConnMock) LocalAddr() net.Addr {
-	return nil
+type countingHandler struct {
+	count    int
+	expected int
+	done     chan struct{}
 }
 
-func (c *ConnMock) RemoteAddr() net.Addr {
-	return nil
-}
-
-func (c *ConnMock) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *ConnMock) SetReadDeadline(t time.Time) error {
-	c.isReadDeadline = true
-	return nil
-}
-
-func (c *ConnMock) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-func (s *ServerSuite) TestConnectionClose(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	con := ConnMock{ReadData: []byte(exampleSyslog)}
-	server.goScanConnection(&con)
-	server.Wait()
-	c.Check(con.isClosed, Equals, true)
-}
-
-func (s *ServerSuite) TestConnectionUDPKill(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC5424)
-	server.SetHandler(handler)
-	con := ConnMock{ReadData: []byte(exampleSyslog)}
-	server.goScanConnection(&con)
-	server.Kill()
-	server.Wait()
-	c.Check(con.isClosed, Equals, true)
-}
-
-func (s *ServerSuite) TestTcpTimeout(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	con := ConnMock{ReadData: []byte(exampleSyslog), ReturnTimeout: true}
-	c.Check(con.isReadDeadline, Equals, false)
-	server.goScanConnection(&con)
-	server.Wait()
-	c.Check(con.isReadDeadline, Equals, true)
-	c.Check(handler.LastLogParts, IsNil)
-	c.Check(handler.LastMessageLength, Equals, int64(0))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDP3164(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(exampleSyslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "hostname")
-	c.Check(handler.LastLogParts["tag"], Equals, "tag")
-	c.Check(handler.LastLogParts["content"], Equals, "content")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDP3164NoTag(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(exampleSyslogNoTSTagHost), "127.0.0.1:45789"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "127.0.0.1")
-	c.Check(handler.LastLogParts["hostname_inferred"], Equals, true)
-	c.Check(handler.LastLogParts["tag"], Equals, "")
-	c.Check(handler.LastLogParts["content"], Equals, "INFO     leaving (1) step postscripts")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslogNoTSTagHost)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDPAutomatic3164NoPriority(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(exampleSyslogNoPriority), "127.0.0.1:45789"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "127.0.0.1")
-	c.Check(handler.LastLogParts["tag"], Equals, "")
-	c.Check(handler.LastLogParts["priority"], Equals, 13)
-	c.Check(handler.LastLogParts["content"], Equals, exampleSyslogNoPriority)
-	c.Check(handler.LastLogParts["raw"], Equals, exampleSyslogNoPriority)
-	c.Check(handler.LastLogParts["priority_inferred"], Equals, true)
-	c.Check(handler.LastLogParts["timestamp_inferred"], Equals, true)
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslogNoPriority)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDPAutomaticMalformedIncludesParseError(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(malformedRFC5424Syslog), "127.0.0.1:45789"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["raw"], Equals, malformedRFC5424Syslog)
-	c.Check(handler.LastLogParts["parse_error"], NotNil)
-	c.Check(handler.LastLogParts["tls_peer"], Equals, "")
-	c.Check(handler.LastError, NotNil)
-}
-
-func (s *ServerSuite) TestConnectionLargeFrame(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-
-	largeContent := strings.Repeat("x", 128*1024)
-	message := fmt.Sprintf("<31>Dec 26 05:08:46 hostname tag[296]: %s", largeContent)
-	con := ConnMock{ReadData: []byte(message)}
-	server.goScanConnection(&con)
-	server.Wait()
-
-	c.Check(con.isClosed, Equals, true)
-	c.Check(len(handler.LastLogParts["raw"].(string)), Equals, len(message))
-	c.Check(handler.LastLogParts["content"], Equals, largeContent)
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDP6587(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC6587)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleRFC5424Syslog), exampleRFC5424Syslog))
-	server.datagramChannel <- DatagramMessage{[]byte(framedSyslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "mymachine.example.com")
-	c.Check(handler.LastLogParts["facility"], Equals, 4)
-	c.Check(handler.LastLogParts["message"], Equals, "'su root' failed for lonvick on /dev/pts/8")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleRFC5424Syslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDPAutomatic3164(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(exampleSyslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "hostname")
-	c.Check(handler.LastLogParts["tag"], Equals, "tag")
-	c.Check(handler.LastLogParts["content"], Equals, "content")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDPAutomatic5424(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	server.datagramChannel <- DatagramMessage{[]byte(exampleRFC5424Syslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "mymachine.example.com")
-	c.Check(handler.LastLogParts["facility"], Equals, 4)
-	c.Check(handler.LastLogParts["message"], Equals, "'su root' failed for lonvick on /dev/pts/8")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleRFC5424Syslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestUDPAutomatic3164Plus6587OctetCount(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleSyslog), exampleSyslog))
-	server.datagramChannel <- DatagramMessage{[]byte(framedSyslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "hostname")
-	c.Check(handler.LastLogParts["tag"], Equals, "tag")
-	c.Check(handler.LastLogParts["content"], Equals, "content")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleSyslog)))
-	c.Check(handler.LastError, IsNil)
-}
-
-func (s *ServerSuite) TestKillWithInflightDatagrams(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(RFC3164)
-	server.SetHandler(handler)
-	server.SetDatagramChannelSize(0)
-	err := server.ListenUDP("127.0.0.1:0")
-	c.Assert(err, IsNil)
-
-	var killOnce sync.Once
-	killErr := make(chan error, 1)
-	handler.OnHandle = func(logParts format.LogParts, msgLen int64, err error) {
-		killOnce.Do(func() {
-			time.Sleep(50 * time.Millisecond)
-			killErr <- server.Kill()
-		})
+func (h *countingHandler) Handle(format.LogParts, int64, error) {
+	h.count++
+	if h.count == h.expected {
+		close(h.done)
 	}
-
-	server.Boot()
-
-	serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
-	c.Assert(err, IsNil)
-	con, err := net.DialUDP("udp", nil, serverAddr)
-	c.Assert(err, IsNil)
-	defer con.Close()
-
-	_, err = con.Write([]byte(exampleSyslog))
-	c.Assert(err, IsNil)
-	_, err = con.Write([]byte(exampleSyslog))
-	c.Assert(err, IsNil)
-
-	done := make(chan struct{})
-	go func() {
-		server.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		c.Fatal("timeout waiting for UDP shutdown")
-	}
-
-	select {
-	case err = <-killErr:
-		c.Assert(err, IsNil)
-	default:
-		c.Fatal("Kill() was not triggered by the handler")
-	}
-
-	c.Assert(handler.LastLogParts["hostname"], Equals, "hostname")
-}
-
-func (s *ServerSuite) TestUDPAutomatic5424Plus6587OctetCount(c *C) {
-	handler := new(HandlerMock)
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.goParseDatagrams()
-	framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleRFC5424Syslog), exampleRFC5424Syslog))
-	server.datagramChannel <- DatagramMessage{[]byte(framedSyslog), "0.0.0.0"}
-	close(server.datagramChannel)
-	server.Wait()
-	c.Check(handler.LastLogParts["hostname"], Equals, "mymachine.example.com")
-	c.Check(handler.LastLogParts["facility"], Equals, 4)
-	c.Check(handler.LastLogParts["message"], Equals, "'su root' failed for lonvick on /dev/pts/8")
-	c.Check(handler.LastMessageLength, Equals, int64(len(exampleRFC5424Syslog)))
-	c.Check(handler.LastError, IsNil)
 }
 
 type handlerSlow struct {
-	*handlerCounter
+	*countingHandler
 	contents []string
 }
 
-func (s *handlerSlow) Handle(logParts format.LogParts, msgLen int64, err error) {
-	if len(s.contents) == 0 {
+func (h *handlerSlow) Handle(logParts format.LogParts, msgLen int64, err error) {
+	if len(h.contents) == 0 {
 		time.Sleep(time.Second)
 	}
-	s.contents = append(s.contents, logParts["content"].(string))
-	s.handlerCounter.Handle(logParts, msgLen, err)
+	h.contents = append(h.contents, logParts["content"].(string))
+	h.countingHandler.Handle(logParts, msgLen, err)
 }
 
-func (s *ServerSuite) TestUDPRace(c *C) {
-	handler := &handlerSlow{handlerCounter: &handlerCounter{expected: 3, done: make(chan struct{})}}
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.ListenUDP("127.0.0.1:0")
-	server.Boot()
-	conn, err := net.Dial("udp", server.connections[0].LocalAddr().String())
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "1"))
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "2"))
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "3"))
-	c.Assert(err, IsNil)
-	conn.Close()
-	<-handler.done
-	c.Check(handler.contents, DeepEquals, []string{"content1", "content2", "content3"})
-}
+var (
+	exampleSyslog            = "<31>Dec 26 05:08:46 hostname tag[296]: content"
+	exampleSyslogNoTSTagHost = "<14>INFO     leaving (1) step postscripts"
+	exampleSyslogNoPriority  = "Dec 26 05:08:46 hostname test with no priority - see rfc 3164 section 4.3.3"
+	exampleRFC5424Syslog     = "<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8"
+	malformedRFC5424Syslog   = "<34>1 not-a-timestamp mymachine.example.com su - ID47 - malformed timestamp"
+)
 
-func (s *ServerSuite) TestTCPRace(c *C) {
-	handler := &handlerSlow{handlerCounter: &handlerCounter{expected: 3, done: make(chan struct{})}}
-	server := NewServer()
-	server.SetFormat(Automatic)
-	server.SetHandler(handler)
-	server.SetTimeout(10)
-	server.ListenTCP("127.0.0.1:0")
-	server.Boot()
-	conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "1\n"))
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "2\n"))
-	c.Assert(err, IsNil)
-	_, err = conn.Write([]byte(exampleSyslog + "3\n"))
-	c.Assert(err, IsNil)
-	conn.Close()
-	<-handler.done
-	c.Check(handler.contents, DeepEquals, []string{"content1", "content2", "content3"})
-}
+var _ = Describe("Server", func() {
+	It("synchronizes concurrent last-error access", func() {
+		server := NewServer()
+		server.SetFormat(RFC5424)
+		server.SetHandler(noopHandler{})
+
+		var wg sync.WaitGroup
+		for i := 0; i < 100; i++ {
+			wg.Add(2)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				server.parser([]byte("<34>1 not-a-timestamp host app proc msg -"), "127.0.0.1", "")
+			}()
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				_ = server.GetLastError()
+			}()
+		}
+		wg.Wait()
+	})
+
+	It("receives a UDP message", func() {
+		handled := make(chan struct{})
+		handler := &handlerMock{called: handled}
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		err := server.ListenUDP("127.0.0.1:0")
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(server.Boot()).To(Succeed())
+		serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
+		Expect(err).NotTo(HaveOccurred())
+		con, err := net.DialUDP("udp", nil, serverAddr)
+		Expect(err).NotTo(HaveOccurred())
+		defer con.Close()
+
+		_, err = con.Write([]byte(exampleSyslog))
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(handled).Should(BeClosed())
+		Expect(server.Kill()).To(Succeed())
+		server.Wait()
+
+		Expect(handler.lastLogParts["hostname"]).To(Equal("hostname"))
+		Expect(handler.lastLogParts["tag"]).To(Equal("tag"))
+		Expect(handler.lastLogParts["content"]).To(Equal("content"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("closes a scanned connection after processing", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		con := connMock{readData: []byte(exampleSyslog)}
+		server.goScanConnection(&con)
+		server.Wait()
+		Expect(con.isClosed).To(BeTrue())
+	})
+
+	It("closes a connection when killed", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC5424)
+		server.SetHandler(handler)
+		con := connMock{readData: []byte(exampleSyslog)}
+		server.goScanConnection(&con)
+		Expect(server.Kill()).To(Succeed())
+		server.Wait()
+		Expect(con.isClosed).To(BeTrue())
+	})
+
+	It("ignores timeouts while scanning", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		con := connMock{readData: []byte(exampleSyslog), returnTimeout: true}
+		Expect(con.isReadDeadline).To(BeFalse())
+		server.goScanConnection(&con)
+		server.Wait()
+		Expect(con.isReadDeadline).To(BeTrue())
+		Expect(handler.lastLogParts).To(BeNil())
+		Expect(handler.lastMessageLength).To(Equal(int64(0)))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("parses RFC3164 datagrams", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(exampleSyslog), "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("hostname"))
+		Expect(handler.lastLogParts["tag"]).To(Equal("tag"))
+		Expect(handler.lastLogParts["content"]).To(Equal("content"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("infers the hostname for RFC3164 messages without a tag", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(exampleSyslogNoTSTagHost), "127.0.0.1:45789"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("127.0.0.1"))
+		Expect(handler.lastLogParts["hostname_inferred"]).To(Equal(true))
+		Expect(handler.lastLogParts["tag"]).To(Equal(""))
+		Expect(handler.lastLogParts["content"]).To(Equal("INFO     leaving (1) step postscripts"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslogNoTSTagHost))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("marks inferred RFC3164 priority and timestamp in automatic mode", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(exampleSyslogNoPriority), "127.0.0.1:45789"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("127.0.0.1"))
+		Expect(handler.lastLogParts["tag"]).To(Equal(""))
+		Expect(handler.lastLogParts["priority"]).To(Equal(13))
+		Expect(handler.lastLogParts["content"]).To(Equal(exampleSyslogNoPriority))
+		Expect(handler.lastLogParts["raw"]).To(Equal(exampleSyslogNoPriority))
+		Expect(handler.lastLogParts["priority_inferred"]).To(Equal(true))
+		Expect(handler.lastLogParts["timestamp_inferred"]).To(Equal(true))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslogNoPriority))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("includes parse errors and raw payloads for malformed automatic messages", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(malformedRFC5424Syslog), "127.0.0.1:45789"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["raw"]).To(Equal(malformedRFC5424Syslog))
+		Expect(handler.lastLogParts["parse_error"]).NotTo(BeNil())
+		Expect(handler.lastLogParts["tls_peer"]).To(Equal(""))
+		Expect(handler.lastError).To(HaveOccurred())
+	})
+
+	It("handles large frames without truncating the payload", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+
+		largeContent := strings.Repeat("x", 128*1024)
+		message := fmt.Sprintf("<31>Dec 26 05:08:46 hostname tag[296]: %s", largeContent)
+		con := connMock{readData: []byte(message)}
+		server.goScanConnection(&con)
+		server.Wait()
+
+		Expect(con.isClosed).To(BeTrue())
+		Expect(len(handler.lastLogParts["raw"].(string))).To(Equal(len(message)))
+		Expect(handler.lastLogParts["content"]).To(Equal(largeContent))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("parses RFC6587 datagrams", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC6587)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleRFC5424Syslog), exampleRFC5424Syslog))
+		server.datagramChannel <- DatagramMessage{framedSyslog, "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("mymachine.example.com"))
+		Expect(handler.lastLogParts["facility"]).To(Equal(4))
+		Expect(handler.lastLogParts["message"]).To(Equal("'su root' failed for lonvick on /dev/pts/8"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleRFC5424Syslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("auto-detects RFC3164 datagrams", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(exampleSyslog), "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("hostname"))
+		Expect(handler.lastLogParts["tag"]).To(Equal("tag"))
+		Expect(handler.lastLogParts["content"]).To(Equal("content"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("auto-detects RFC5424 datagrams", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		server.datagramChannel <- DatagramMessage{[]byte(exampleRFC5424Syslog), "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("mymachine.example.com"))
+		Expect(handler.lastLogParts["facility"]).To(Equal(4))
+		Expect(handler.lastLogParts["message"]).To(Equal("'su root' failed for lonvick on /dev/pts/8"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleRFC5424Syslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("auto-detects RFC3164 messages wrapped with RFC6587 octet counts", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleSyslog), exampleSyslog))
+		server.datagramChannel <- DatagramMessage{framedSyslog, "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("hostname"))
+		Expect(handler.lastLogParts["tag"]).To(Equal("tag"))
+		Expect(handler.lastLogParts["content"]).To(Equal("content"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleSyslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("shuts down cleanly with inflight datagrams", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(RFC3164)
+		server.SetHandler(handler)
+		server.SetDatagramChannelSize(0)
+		Expect(server.ListenUDP("127.0.0.1:0")).To(Succeed())
+
+		var killOnce sync.Once
+		killErr := make(chan error, 1)
+		handler.onHandle = func(format.LogParts, int64, error) {
+			killOnce.Do(func() {
+				time.Sleep(50 * time.Millisecond)
+				killErr <- server.Kill()
+			})
+		}
+
+		Expect(server.Boot()).To(Succeed())
+
+		serverAddr, err := net.ResolveUDPAddr("udp", server.connections[0].LocalAddr().String())
+		Expect(err).NotTo(HaveOccurred())
+		con, err := net.DialUDP("udp", nil, serverAddr)
+		Expect(err).NotTo(HaveOccurred())
+		defer con.Close()
+
+		_, err = con.Write([]byte(exampleSyslog))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = con.Write([]byte(exampleSyslog))
+		Expect(err).NotTo(HaveOccurred())
+
+		done := make(chan struct{})
+		go func() {
+			defer GinkgoRecover()
+			server.Wait()
+			close(done)
+		}()
+
+		Eventually(done).Should(BeClosed())
+		var gotErr error
+		Eventually(killErr).Should(Receive(&gotErr))
+		Expect(gotErr).NotTo(HaveOccurred())
+		Expect(handler.lastLogParts["hostname"]).To(Equal("hostname"))
+	})
+
+	It("auto-detects RFC5424 messages wrapped with RFC6587 octet counts", func() {
+		handler := new(handlerMock)
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		server.goParseDatagrams()
+		framedSyslog := []byte(fmt.Sprintf("%d %s", len(exampleRFC5424Syslog), exampleRFC5424Syslog))
+		server.datagramChannel <- DatagramMessage{framedSyslog, "0.0.0.0"}
+		close(server.datagramChannel)
+		server.Wait()
+		Expect(handler.lastLogParts["hostname"]).To(Equal("mymachine.example.com"))
+		Expect(handler.lastLogParts["facility"]).To(Equal(4))
+		Expect(handler.lastLogParts["message"]).To(Equal("'su root' failed for lonvick on /dev/pts/8"))
+		Expect(handler.lastMessageLength).To(Equal(int64(len(exampleRFC5424Syslog))))
+		Expect(handler.lastError).NotTo(HaveOccurred())
+	})
+
+	It("preserves UDP ordering even with a slow handler", func() {
+		handler := &handlerSlow{countingHandler: &countingHandler{expected: 3, done: make(chan struct{})}}
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		Expect(server.ListenUDP("127.0.0.1:0")).To(Succeed())
+		Expect(server.Boot()).To(Succeed())
+		conn, err := net.Dial("udp", server.connections[0].LocalAddr().String())
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "1"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "2"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "3"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.Close()).To(Succeed())
+		Eventually(handler.done, 5*time.Second).Should(BeClosed())
+		Expect(handler.contents).To(Equal([]string{"content1", "content2", "content3"}))
+	})
+
+	It("preserves TCP ordering even with a slow handler", func() {
+		handler := &handlerSlow{countingHandler: &countingHandler{expected: 3, done: make(chan struct{})}}
+		server := NewServer()
+		server.SetFormat(Automatic)
+		server.SetHandler(handler)
+		server.SetTimeout(10)
+		Expect(server.ListenTCP("127.0.0.1:0")).To(Succeed())
+		Expect(server.Boot()).To(Succeed())
+		conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "1\n"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "2\n"))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = conn.Write([]byte(exampleSyslog + "3\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.Close()).To(Succeed())
+		Eventually(handler.done, 5*time.Second).Should(BeClosed())
+		Expect(handler.contents).To(Equal([]string{"content1", "content2", "content3"}))
+	})
+})

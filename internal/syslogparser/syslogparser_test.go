@@ -3,74 +3,67 @@ package syslogparser
 import (
 	"testing"
 
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// Hooks up gocheck into the gotest runner.
-func Test(t *testing.T) { TestingT(t) }
-
-type CommonTestSuite struct {
-}
-
-var _ = Suite(&CommonTestSuite{})
-
-func (s *CommonTestSuite) TestParsePriority_Empty(c *C) {
+func testParsePriority_Empty() {
 	pri := newPriority(0)
 	buff := []byte("")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityEmpty)
+	assertPriority(pri, buff, start, start, ErrPriorityEmpty)
 }
 
-func (s *CommonTestSuite) TestParsePriority_NoStart(c *C) {
+func testParsePriority_NoStart() {
 	pri := newPriority(0)
 	buff := []byte("7>")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityNoStart)
+	assertPriority(pri, buff, start, start, ErrPriorityNoStart)
 }
 
-func (s *CommonTestSuite) TestParsePriority_NoEnd(c *C) {
+func testParsePriority_NoEnd() {
 	pri := newPriority(0)
 	buff := []byte("<77")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityNoEnd)
+	assertPriority(pri, buff, start, start, ErrPriorityNoEnd)
 }
 
-func (s *CommonTestSuite) TestParsePriority_TooShort(c *C) {
+func testParsePriority_TooShort() {
 	pri := newPriority(0)
 	buff := []byte("<>")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityTooShort)
+	assertPriority(pri, buff, start, start, ErrPriorityTooShort)
 }
 
-func (s *CommonTestSuite) TestParsePriority_TooLong(c *C) {
+func testParsePriority_TooLong() {
 	pri := newPriority(0)
 	buff := []byte("<1233>")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityTooLong)
+	assertPriority(pri, buff, start, start, ErrPriorityTooLong)
 }
 
-func (s *CommonTestSuite) TestParsePriority_NoDigits(c *C) {
+func testParsePriority_NoDigits() {
 	pri := newPriority(0)
 	buff := []byte("<7a8>")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start, ErrPriorityNonDigit)
+	assertPriority(pri, buff, start, start, ErrPriorityNonDigit)
 }
 
-func (s *CommonTestSuite) TestParsePriority_Ok(c *C) {
+func testParsePriority_Ok() {
 	pri := newPriority(190)
 	buff := []byte("<190>")
 	start := 0
 
-	s.assertPriority(c, pri, buff, start, start+5, nil)
+	assertPriority(pri, buff, start, start+5, nil)
 }
 
-func (s *CommonTestSuite) TestNewPriority(c *C) {
+func testNewPriority() {
 	obtained := newPriority(165)
 
 	expected := Priority{
@@ -79,56 +72,56 @@ func (s *CommonTestSuite) TestNewPriority(c *C) {
 		S: Severity{Value: 5},
 	}
 
-	c.Assert(obtained, DeepEquals, expected)
+	Expect(obtained).To(Equal(expected))
 }
 
-func (s *CommonTestSuite) TestParseVersion_NotFound(c *C) {
+func testParseVersion_NotFound() {
 	buff := []byte("<123>")
 	start := 5
 
-	s.assertVersion(c, NO_VERSION, buff, start, start, ErrVersionNotFound)
+	assertVersion(NO_VERSION, buff, start, start, ErrVersionNotFound)
 }
 
-func (s *CommonTestSuite) TestParseVersion_NonDigit(c *C) {
+func testParseVersion_NonDigit() {
 	buff := []byte("<123>a")
 	start := 5
 
-	s.assertVersion(c, NO_VERSION, buff, start, start+1, nil)
+	assertVersion(NO_VERSION, buff, start, start+1, nil)
 }
 
-func (s *CommonTestSuite) TestParseVersion_Ok(c *C) {
+func testParseVersion_Ok() {
 	buff := []byte("<123>1")
 	start := 5
 
-	s.assertVersion(c, 1, buff, start, start+1, nil)
+	assertVersion(1, buff, start, start+1, nil)
 }
 
-func (s *CommonTestSuite) TestParseHostname_Invalid(c *C) {
+func testParseHostname_Invalid() {
 	// XXX : no year specified. Assumed current year
 	// XXX : no timezone specified. Assume UTC
 	buff := []byte("foo name")
 	start := 0
 	hostname := "foo"
 
-	s.assertHostname(c, hostname, buff, start, 3, nil)
+	assertHostname(hostname, buff, start, 3, nil)
 }
 
-func (s *CommonTestSuite) TestParseHostname_Valid(c *C) {
+func testParseHostname_Valid() {
 	// XXX : no year specified. Assumed current year
 	// XXX : no timezone specified. Assume UTC
 	hostname := "ubuntu11.somehost.com"
 	buff := []byte(hostname + " ")
 	start := 0
 
-	s.assertHostname(c, hostname, buff, start, len(hostname), nil)
+	assertHostname(hostname, buff, start, len(hostname), nil)
 }
 
-func (s *CommonTestSuite) BenchmarkParsePriority(c *C) {
+func BenchmarkParsePriority(b *testing.B) {
 	buff := []byte("<190>")
 	var start int
 	l := len(buff)
 
-	for i := 0; i < c.N; i++ {
+	for i := 0; i < b.N; i++ {
 		start = 0
 		_, err := ParsePriority(buff, &start, l)
 		if err != nil {
@@ -137,12 +130,12 @@ func (s *CommonTestSuite) BenchmarkParsePriority(c *C) {
 	}
 }
 
-func (s *CommonTestSuite) BenchmarkParseVersion(c *C) {
+func BenchmarkParseVersion(b *testing.B) {
 	buff := []byte("<123>1")
 	start := 5
 	l := len(buff)
 
-	for i := 0; i < c.N; i++ {
+	for i := 0; i < b.N; i++ {
 		start = 0
 		_, err := ParseVersion(buff, &start, l)
 		if err != nil {
@@ -151,23 +144,47 @@ func (s *CommonTestSuite) BenchmarkParseVersion(c *C) {
 	}
 }
 
-func (s *CommonTestSuite) assertPriority(c *C, p Priority, b []byte, cursor int, expC int, e error) {
+func assertPriority(p Priority, b []byte, cursor int, expC int, e error) {
 	obtained, err := ParsePriority(b, &cursor, len(b))
-	c.Assert(obtained, DeepEquals, p)
-	c.Assert(cursor, Equals, expC)
-	c.Assert(err, Equals, e)
+	Expect(obtained).To(Equal(p))
+	Expect(cursor).To(Equal(expC))
+	expectError(err, e)
 }
 
-func (s *CommonTestSuite) assertVersion(c *C, version int, b []byte, cursor int, expC int, e error) {
+func assertVersion(version int, b []byte, cursor int, expC int, e error) {
 	obtained, err := ParseVersion(b, &cursor, len(b))
-	c.Assert(obtained, Equals, version)
-	c.Assert(cursor, Equals, expC)
-	c.Assert(err, Equals, e)
+	Expect(obtained).To(Equal(version))
+	Expect(cursor).To(Equal(expC))
+	expectError(err, e)
 }
 
-func (s *CommonTestSuite) assertHostname(c *C, h string, b []byte, cursor int, expC int, e error) {
+func assertHostname(h string, b []byte, cursor int, expC int, e error) {
 	obtained, err := ParseHostname(b, &cursor, len(b))
-	c.Assert(obtained, Equals, h)
-	c.Assert(cursor, Equals, expC)
-	c.Assert(err, Equals, e)
+	Expect(obtained).To(Equal(h))
+	Expect(cursor).To(Equal(expC))
+	expectError(err, e)
 }
+
+func expectError(obtained error, expected error) {
+	if expected == nil {
+		Expect(obtained).To(BeNil())
+		return
+	}
+	Expect(obtained).To(Equal(expected))
+}
+
+var _ = Describe("Common parser helpers", func() {
+	It("parse priority empty", testParsePriority_Empty)
+	It("parse priority no start", testParsePriority_NoStart)
+	It("parse priority no end", testParsePriority_NoEnd)
+	It("parse priority too short", testParsePriority_TooShort)
+	It("parse priority too long", testParsePriority_TooLong)
+	It("parse priority no digits", testParsePriority_NoDigits)
+	It("parse priority ok", testParsePriority_Ok)
+	It("new priority", testNewPriority)
+	It("parse version not found", testParseVersion_NotFound)
+	It("parse version non digit", testParseVersion_NonDigit)
+	It("parse version ok", testParseVersion_Ok)
+	It("parse hostname invalid", testParseHostname_Invalid)
+	It("parse hostname valid", testParseHostname_Valid)
+})

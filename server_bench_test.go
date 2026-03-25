@@ -73,7 +73,11 @@ func (c *fakePacketConn) SetWriteDeadline(t time.Time) error {
 func BenchmarkDatagramNoFormatting(b *testing.B) {
 	handler := &handlerCounter{expected: b.N, done: make(chan struct{})}
 	server := NewServer()
-	defer server.Kill()
+	defer func() {
+		if err := server.Kill(); err != nil {
+			b.Fatal(err)
+		}
+	}()
 	server.SetFormat(noopFormatter{})
 	server.SetHandler(handler)
 	reader, writer := io.Pipe()
@@ -82,7 +86,9 @@ func BenchmarkDatagramNoFormatting(b *testing.B) {
 	msg := []byte(exampleSyslog + "\n")
 	b.SetBytes(int64(len(msg)))
 	for i := 0; i < b.N; i++ {
-		writer.Write(msg)
+		if _, err := writer.Write(msg); err != nil {
+			b.Fatal(err)
+		}
 	}
 	<-handler.done
 }
@@ -90,16 +96,30 @@ func BenchmarkDatagramNoFormatting(b *testing.B) {
 func BenchmarkTCPNoFormatting(b *testing.B) {
 	handler := &handlerCounter{expected: b.N, done: make(chan struct{})}
 	server := NewServer()
-	defer server.Kill()
+	defer func() {
+		if err := server.Kill(); err != nil {
+			b.Fatal(err)
+		}
+	}()
 	server.SetFormat(noopFormatter{})
 	server.SetHandler(handler)
-	server.ListenTCP("127.0.0.1:0")
-	server.Boot()
-	conn, _ := net.DialTimeout("tcp", server.listeners[0].Addr().String(), time.Second)
+	if err := server.ListenTCP("127.0.0.1:0"); err != nil {
+		b.Fatal(err)
+	}
+	if err := server.Boot(); err != nil {
+		b.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", server.listeners[0].Addr().String(), time.Second)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close()
 	msg := []byte(exampleSyslog + "\n")
 	b.SetBytes(int64(len(msg)))
 	for i := 0; i < b.N; i++ {
-		conn.Write(msg)
+		if _, err := conn.Write(msg); err != nil {
+			b.Fatal(err)
+		}
 	}
 	<-handler.done
 }

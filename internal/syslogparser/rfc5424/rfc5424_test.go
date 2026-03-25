@@ -7,18 +7,11 @@ import (
 	"time"
 
 	"github.com/joejulian/go-syslog/v2/internal/syslogparser"
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-// Hooks up gocheck into the gotest runner.
-func Test(t *testing.T) { TestingT(t) }
-
-type Rfc5424TestSuite struct {
-}
-
-var _ = Suite(&Rfc5424TestSuite{})
-
-func (s *Rfc5424TestSuite) TestParser_Valid(c *C) {
+func testParser_Valid() {
 	fixtures := []string{
 		// no STRUCTURED-DATA
 		"<34>1 2003-10-11T22:14:15.003Z mymachine.example.com su - ID47 - 'su root' failed for lonvick on /dev/pts/8",
@@ -33,7 +26,7 @@ func (s *Rfc5424TestSuite) TestParser_Valid(c *C) {
 	}
 
 	tmpTs, err := time.Parse("-07:00", "-07:00")
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	expected := []syslogparser.LogParts{
 		syslogparser.LogParts{
@@ -116,7 +109,7 @@ func (s *Rfc5424TestSuite) TestParser_Valid(c *C) {
 		},
 	}
 
-	c.Assert(len(fixtures), Equals, len(expected))
+	Expect(len(fixtures)).To(Equal(len(expected)))
 	start := 0
 	for i, buff := range fixtures {
 		expectedP := &Parser{
@@ -126,27 +119,27 @@ func (s *Rfc5424TestSuite) TestParser_Valid(c *C) {
 		}
 
 		p := NewParser([]byte(buff))
-		c.Assert(p, DeepEquals, expectedP)
+		Expect(p).To(Equal(expectedP))
 
 		err := p.Parse()
-		c.Assert(err, IsNil)
+		Expect(err).To(BeNil())
 
 		obtained := p.Dump()
 		for k, v := range obtained {
-			c.Assert(v, DeepEquals, expected[i][k])
+			Expect(v).To(Equal(expected[i][k]))
 		}
 	}
 }
 
-func (s *Rfc5424TestSuite) TestParser_Truncated(c *C) {
+func testParser_Truncated() {
 	msg := "<165>1 2003-08-24T05:14:15.000003-07:00 192.0.2.1 myproc 8710 - - %% It's time to make the do-nuts."
 	for i := range msg {
 		p := NewParser([]byte(msg[:i]))
-		p.Parse()
+		_ = p.Parse()
 	}
 }
 
-func (s *Rfc5424TestSuite) TestParseHeader_Valid(c *C) {
+func testParseHeader_Valid() {
 	ts := time.Date(2003, time.October, 11, 22, 14, 15, 3*10e5, time.UTC)
 	tsString := "2003-10-11T22:14:15.003Z"
 	hostname := "mymachine.example.com"
@@ -243,206 +236,206 @@ func (s *Rfc5424TestSuite) TestParseHeader_Valid(c *C) {
 	for i, f := range fixtures {
 		p := NewParser([]byte(f))
 		obtained, err := p.parseHeader()
-		c.Assert(err, IsNil)
-		c.Assert(obtained, Equals, expected[i])
-		c.Assert(p.cursor, Equals, len(f))
+		Expect(err).To(BeNil())
+		Expect(obtained).To(Equal(expected[i]))
+		Expect(p.cursor).To(Equal(len(f)))
 	}
 }
 
-func (s *Rfc5424TestSuite) TestParseHeader_InvalidProcID(c *C) {
+func testParseHeader_InvalidProcID() {
 	procID := strings.Repeat("1", 129)
 	buff := []byte(fmt.Sprintf("<165>1 2003-10-11T22:14:15.003Z mymachine.example.com su %s ID47 ", procID))
 
 	p := NewParser(buff)
 	_, err := p.parseHeader()
 
-	c.Assert(err, Equals, ErrInvalidProcId)
+	Expect(err).To(Equal(ErrInvalidProcId))
 }
 
-func (s *Rfc5424TestSuite) TestParseHeader_InvalidMsgID(c *C) {
+func testParseHeader_InvalidMsgID() {
 	msgID := strings.Repeat("1", 33)
 	buff := []byte(fmt.Sprintf("<165>1 2003-10-11T22:14:15.003Z mymachine.example.com su 123 %s ", msgID))
 
 	p := NewParser(buff)
 	_, err := p.parseHeader()
 
-	c.Assert(err, Equals, ErrInvalidMsgId)
+	Expect(err).To(Equal(ErrInvalidMsgId))
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_UTC(c *C) {
+func testParseTimestamp_UTC() {
 	buff := []byte("1985-04-12T23:20:50.52Z")
 	ts := time.Date(1985, time.April, 12, 23, 20, 50, 52*10e6, time.UTC)
 
-	s.assertTimestamp(c, ts, buff, 23, nil)
+	assertTimestamp(ts, buff, 23, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_NumericTimezone(c *C) {
+func testParseTimestamp_NumericTimezone() {
 	tz := "-04:00"
 	buff := []byte("1985-04-12T19:20:50.52" + tz)
 
 	tmpTs, err := time.Parse("-07:00", tz)
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	ts := time.Date(1985, time.April, 12, 19, 20, 50, 52*10e6, tmpTs.Location())
 
-	s.assertTimestamp(c, ts, buff, len(buff), nil)
+	assertTimestamp(ts, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_MilliSeconds(c *C) {
+func testParseTimestamp_MilliSeconds() {
 	buff := []byte("2003-10-11T22:14:15.003Z")
 
 	ts := time.Date(2003, time.October, 11, 22, 14, 15, 3*10e5, time.UTC)
 
-	s.assertTimestamp(c, ts, buff, len(buff), nil)
+	assertTimestamp(ts, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_MicroSeconds(c *C) {
+func testParseTimestamp_MicroSeconds() {
 	tz := "-07:00"
 	buff := []byte("2003-08-24T05:14:15.000003" + tz)
 
 	tmpTs, err := time.Parse("-07:00", tz)
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	ts := time.Date(2003, time.August, 24, 5, 14, 15, 3*10e2, tmpTs.Location())
 
-	s.assertTimestamp(c, ts, buff, len(buff), nil)
+	assertTimestamp(ts, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_NanoSeconds(c *C) {
+func testParseTimestamp_NanoSeconds() {
 	buff := []byte("2003-08-24T05:14:15.000000003-07:00")
 	ts := new(time.Time)
 
-	s.assertTimestamp(c, *ts, buff, 26, syslogparser.ErrTimestampUnknownFormat)
+	assertTimestamp(*ts, buff, 26, syslogparser.ErrTimestampUnknownFormat)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_NilValue(c *C) {
+func testParseTimestamp_NilValue() {
 	buff := []byte("-")
 	ts := new(time.Time)
 
-	s.assertTimestamp(c, *ts, buff, 1, nil)
+	assertTimestamp(*ts, buff, 1, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseTimestamp_Empty(c *C) {
+func testParseTimestamp_Empty() {
 	buff := []byte("")
 	ts := new(time.Time)
 
-	s.assertTimestamp(c, *ts, buff, 0, ErrInvalidTimeFormat)
+	assertTimestamp(*ts, buff, 0, ErrInvalidTimeFormat)
 }
 
-func (s *Rfc5424TestSuite) TestFindNextSpace_NoSpace(c *C) {
+func testFindNextSpace_NoSpace() {
 	buff := []byte("aaaaaa")
 
-	s.assertFindNextSpace(c, 0, buff, syslogparser.ErrNoSpace)
+	assertFindNextSpace(0, buff, syslogparser.ErrNoSpace)
 }
 
-func (s *Rfc5424TestSuite) TestFindNextSpace_SpaceFound(c *C) {
+func testFindNextSpace_SpaceFound() {
 	buff := []byte("foo bar baz")
 
-	s.assertFindNextSpace(c, 4, buff, nil)
+	assertFindNextSpace(4, buff, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseYear_Invalid(c *C) {
+func testParseYear_Invalid() {
 	buff := []byte("1a2b")
 	expected := 0
 
-	s.assertParseYear(c, expected, buff, 4, ErrYearInvalid)
+	assertParseYear(expected, buff, 4, ErrYearInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseYear_TooShort(c *C) {
+func testParseYear_TooShort() {
 	buff := []byte("123")
 	expected := 0
 
-	s.assertParseYear(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseYear(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseYear_Valid(c *C) {
+func testParseYear_Valid() {
 	buff := []byte("2013")
 	expected := 2013
 
-	s.assertParseYear(c, expected, buff, 4, nil)
+	assertParseYear(expected, buff, 4, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseMonth_InvalidString(c *C) {
+func testParseMonth_InvalidString() {
 	buff := []byte("ab")
 	expected := 0
 
-	s.assertParseMonth(c, expected, buff, 2, ErrMonthInvalid)
+	assertParseMonth(expected, buff, 2, ErrMonthInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseMonth_InvalidRange(c *C) {
+func testParseMonth_InvalidRange() {
 	buff := []byte("00")
 	expected := 0
 
-	s.assertParseMonth(c, expected, buff, 2, ErrMonthInvalid)
+	assertParseMonth(expected, buff, 2, ErrMonthInvalid)
 
 	// ----
 
 	buff = []byte("13")
 
-	s.assertParseMonth(c, expected, buff, 2, ErrMonthInvalid)
+	assertParseMonth(expected, buff, 2, ErrMonthInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseMonth_TooShort(c *C) {
+func testParseMonth_TooShort() {
 	buff := []byte("1")
 	expected := 0
 
-	s.assertParseMonth(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseMonth(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseMonth_Valid(c *C) {
+func testParseMonth_Valid() {
 	buff := []byte("02")
 	expected := 2
 
-	s.assertParseMonth(c, expected, buff, 2, nil)
+	assertParseMonth(expected, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseDay_InvalidString(c *C) {
+func testParseDay_InvalidString() {
 	buff := []byte("ab")
 	expected := 0
 
-	s.assertParseDay(c, expected, buff, 2, ErrDayInvalid)
+	assertParseDay(expected, buff, 2, ErrDayInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseDay_TooShort(c *C) {
+func testParseDay_TooShort() {
 	buff := []byte("1")
 	expected := 0
 
-	s.assertParseDay(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseDay(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseDay_InvalidRange(c *C) {
+func testParseDay_InvalidRange() {
 	buff := []byte("00")
 	expected := 0
 
-	s.assertParseDay(c, expected, buff, 2, ErrDayInvalid)
+	assertParseDay(expected, buff, 2, ErrDayInvalid)
 
 	// ----
 
 	buff = []byte("32")
 
-	s.assertParseDay(c, expected, buff, 2, ErrDayInvalid)
+	assertParseDay(expected, buff, 2, ErrDayInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseDay_Valid(c *C) {
+func testParseDay_Valid() {
 	buff := []byte("02")
 	expected := 2
 
-	s.assertParseDay(c, expected, buff, 2, nil)
+	assertParseDay(expected, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseFullDate_Invalid(c *C) {
+func testParseFullDate_Invalid() {
 	buff := []byte("2013+10-28")
 	fd := fullDate{}
 
-	s.assertParseFullDate(c, fd, buff, 4, syslogparser.ErrTimestampUnknownFormat)
+	assertParseFullDate(fd, buff, 4, syslogparser.ErrTimestampUnknownFormat)
 
 	// ---
 
 	buff = []byte("2013-10+28")
-	s.assertParseFullDate(c, fd, buff, 7, syslogparser.ErrTimestampUnknownFormat)
+	assertParseFullDate(fd, buff, 7, syslogparser.ErrTimestampUnknownFormat)
 }
 
-func (s *Rfc5424TestSuite) TestParseFullDate_Valid(c *C) {
+func testParseFullDate_Valid() {
 	buff := []byte("2013-10-28")
 	fd := fullDate{
 		year:  2013,
@@ -450,172 +443,172 @@ func (s *Rfc5424TestSuite) TestParseFullDate_Valid(c *C) {
 		day:   28,
 	}
 
-	s.assertParseFullDate(c, fd, buff, len(buff), nil)
+	assertParseFullDate(fd, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseHour_InvalidString(c *C) {
+func testParseHour_InvalidString() {
 	buff := []byte("azer")
 	expected := 0
 
-	s.assertParseHour(c, expected, buff, 2, ErrHourInvalid)
+	assertParseHour(expected, buff, 2, ErrHourInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseHour_TooShort(c *C) {
+func testParseHour_TooShort() {
 	buff := []byte("1")
 	expected := 0
 
-	s.assertParseHour(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseHour(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseHour_InvalidRange(c *C) {
+func testParseHour_InvalidRange() {
 	buff := []byte("-1")
 	expected := 0
 
-	s.assertParseHour(c, expected, buff, 2, ErrHourInvalid)
+	assertParseHour(expected, buff, 2, ErrHourInvalid)
 
 	// ----
 
 	buff = []byte("24")
 
-	s.assertParseHour(c, expected, buff, 2, ErrHourInvalid)
+	assertParseHour(expected, buff, 2, ErrHourInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseHour_Valid(c *C) {
+func testParseHour_Valid() {
 	buff := []byte("12")
 	expected := 12
 
-	s.assertParseHour(c, expected, buff, 2, nil)
+	assertParseHour(expected, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseMinute_InvalidString(c *C) {
+func testParseMinute_InvalidString() {
 	buff := []byte("azer")
 	expected := 0
 
-	s.assertParseMinute(c, expected, buff, 2, ErrMinuteInvalid)
+	assertParseMinute(expected, buff, 2, ErrMinuteInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseMinute_TooShort(c *C) {
+func testParseMinute_TooShort() {
 	buff := []byte("1")
 	expected := 0
 
-	s.assertParseMinute(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseMinute(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseMinute_InvalidRange(c *C) {
+func testParseMinute_InvalidRange() {
 	buff := []byte("-1")
 	expected := 0
 
-	s.assertParseMinute(c, expected, buff, 2, ErrMinuteInvalid)
+	assertParseMinute(expected, buff, 2, ErrMinuteInvalid)
 
 	// ----
 
 	buff = []byte("60")
 
-	s.assertParseMinute(c, expected, buff, 2, ErrMinuteInvalid)
+	assertParseMinute(expected, buff, 2, ErrMinuteInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseMinute_Valid(c *C) {
+func testParseMinute_Valid() {
 	buff := []byte("12")
 	expected := 12
 
-	s.assertParseMinute(c, expected, buff, 2, nil)
+	assertParseMinute(expected, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecond_InvalidString(c *C) {
+func testParseSecond_InvalidString() {
 	buff := []byte("azer")
 	expected := 0
 
-	s.assertParseSecond(c, expected, buff, 2, ErrSecondInvalid)
+	assertParseSecond(expected, buff, 2, ErrSecondInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecond_TooShort(c *C) {
+func testParseSecond_TooShort() {
 	buff := []byte("1")
 	expected := 0
 
-	s.assertParseSecond(c, expected, buff, 0, syslogparser.ErrEOL)
+	assertParseSecond(expected, buff, 0, syslogparser.ErrEOL)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecond_InvalidRange(c *C) {
+func testParseSecond_InvalidRange() {
 	buff := []byte("-1")
 	expected := 0
 
-	s.assertParseSecond(c, expected, buff, 2, ErrSecondInvalid)
+	assertParseSecond(expected, buff, 2, ErrSecondInvalid)
 
 	// ----
 
 	buff = []byte("60")
 
-	s.assertParseSecond(c, expected, buff, 2, ErrSecondInvalid)
+	assertParseSecond(expected, buff, 2, ErrSecondInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecond_Valid(c *C) {
+func testParseSecond_Valid() {
 	buff := []byte("12")
 	expected := 12
 
-	s.assertParseSecond(c, expected, buff, 2, nil)
+	assertParseSecond(expected, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecFrac_InvalidString(c *C) {
+func testParseSecFrac_InvalidString() {
 	buff := []byte("azerty")
 	expected := 0.0
 
-	s.assertParseSecFrac(c, expected, buff, 0, ErrSecFracInvalid)
+	assertParseSecFrac(expected, buff, 0, ErrSecFracInvalid)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecFrac_NanoSeconds(c *C) {
+func testParseSecFrac_NanoSeconds() {
 	buff := []byte("123456789")
 	expected := 0.123456
 
-	s.assertParseSecFrac(c, expected, buff, 6, nil)
+	assertParseSecFrac(expected, buff, 6, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseSecFrac_Valid(c *C) {
+func testParseSecFrac_Valid() {
 	buff := []byte("0")
 
 	expected := 0.0
-	s.assertParseSecFrac(c, expected, buff, 1, nil)
+	assertParseSecFrac(expected, buff, 1, nil)
 
 	buff = []byte("52")
 	expected = 0.52
-	s.assertParseSecFrac(c, expected, buff, 2, nil)
+	assertParseSecFrac(expected, buff, 2, nil)
 
 	buff = []byte("003")
 	expected = 0.003
-	s.assertParseSecFrac(c, expected, buff, 3, nil)
+	assertParseSecFrac(expected, buff, 3, nil)
 
 	buff = []byte("000003")
 	expected = 0.000003
-	s.assertParseSecFrac(c, expected, buff, 6, nil)
+	assertParseSecFrac(expected, buff, 6, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseNumericalTimeOffset_Valid(c *C) {
+func testParseNumericalTimeOffset_Valid() {
 	buff := []byte("+02:00")
 	cursor := 0
 	l := len(buff)
 	tmpTs, err := time.Parse("-07:00", string(buff))
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	obtained, err := parseNumericalTimeOffset(buff, &cursor, l)
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	expected := tmpTs.Location()
-	c.Assert(obtained, DeepEquals, expected)
+	Expect(obtained).To(Equal(expected))
 
-	c.Assert(cursor, Equals, 6)
+	Expect(cursor).To(Equal(6))
 }
 
-func (s *Rfc5424TestSuite) TestParseTimeOffset_Valid(c *C) {
+func testParseTimeOffset_Valid() {
 	buff := []byte("Z")
 	cursor := 0
 	l := len(buff)
 
 	obtained, err := parseTimeOffset(buff, &cursor, l)
-	c.Assert(err, IsNil)
-	c.Assert(obtained, DeepEquals, time.UTC)
-	c.Assert(cursor, Equals, 1)
+	Expect(err).To(BeNil())
+	Expect(obtained).To(Equal(time.UTC))
+	Expect(cursor).To(Equal(1))
 }
 
-func (s *Rfc5424TestSuite) TestGetHourMin_Valid(c *C) {
+func testGetHourMin_Valid() {
 	buff := []byte("12:34")
 	cursor := 0
 	l := len(buff)
@@ -624,14 +617,14 @@ func (s *Rfc5424TestSuite) TestGetHourMin_Valid(c *C) {
 	expectedMinute := 34
 
 	obtainedHour, obtainedMinute, err := getHourMinute(buff, &cursor, l)
-	c.Assert(err, IsNil)
-	c.Assert(obtainedHour, Equals, expectedHour)
-	c.Assert(obtainedMinute, Equals, expectedMinute)
+	Expect(err).To(BeNil())
+	Expect(obtainedHour).To(Equal(expectedHour))
+	Expect(obtainedMinute).To(Equal(expectedMinute))
 
-	c.Assert(cursor, Equals, l)
+	Expect(cursor).To(Equal(l))
 }
 
-func (s *Rfc5424TestSuite) TestParsePartialTime_Valid(c *C) {
+func testParsePartialTime_Valid() {
 	buff := []byte("05:14:15.000003")
 	cursor := 0
 	l := len(buff)
@@ -644,19 +637,19 @@ func (s *Rfc5424TestSuite) TestParsePartialTime_Valid(c *C) {
 		secFrac: 0.000003,
 	}
 
-	c.Assert(err, IsNil)
-	c.Assert(obtained, DeepEquals, expected)
-	c.Assert(cursor, Equals, l)
+	Expect(err).To(BeNil())
+	Expect(obtained).To(Equal(expected))
+	Expect(cursor).To(Equal(l))
 }
 
-func (s *Rfc5424TestSuite) TestParseFullTime_Valid(c *C) {
+func testParseFullTime_Valid() {
 	tz := "-02:00"
 	buff := []byte("05:14:15.000003" + tz)
 	cursor := 0
 	l := len(buff)
 
 	tmpTs, err := time.Parse("-07:00", string(tz))
-	c.Assert(err, IsNil)
+	Expect(err).To(BeNil())
 
 	obtainedFt, err := parseFullTime(buff, &cursor, l)
 	expectedFt := fullTime{
@@ -669,12 +662,12 @@ func (s *Rfc5424TestSuite) TestParseFullTime_Valid(c *C) {
 		loc: tmpTs.Location(),
 	}
 
-	c.Assert(err, IsNil)
-	c.Assert(obtainedFt, DeepEquals, expectedFt)
-	c.Assert(cursor, Equals, 21)
+	Expect(err).To(BeNil())
+	Expect(obtainedFt).To(Equal(expectedFt))
+	Expect(cursor).To(Equal(21))
 }
 
-func (s *Rfc5424TestSuite) TestToNSec(c *C) {
+func testToNSec() {
 	fixtures := []float64{
 		0.52,
 		0.003,
@@ -687,97 +680,97 @@ func (s *Rfc5424TestSuite) TestToNSec(c *C) {
 		3000,
 	}
 
-	c.Assert(len(fixtures), Equals, len(expected))
+	Expect(len(fixtures)).To(Equal(len(expected)))
 	for i, f := range fixtures {
 		obtained, err := toNSec(f)
-		c.Assert(err, IsNil)
-		c.Assert(obtained, Equals, expected[i])
+		Expect(err).To(BeNil())
+		Expect(obtained).To(Equal(expected[i]))
 	}
 }
 
-func (s *Rfc5424TestSuite) TestParseAppName_Valid(c *C) {
+func testParseAppName_Valid() {
 	buff := []byte("su ")
 	appName := "su"
 
-	s.assertParseAppName(c, appName, buff, 2, nil)
+	assertParseAppName(appName, buff, 2, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseAppName_TooLong(c *C) {
+func testParseAppName_TooLong() {
 	// > 48chars
 	buff := []byte("suuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu ")
 	appName := ""
 
-	s.assertParseAppName(c, appName, buff, 48, ErrInvalidAppName)
+	assertParseAppName(appName, buff, 48, ErrInvalidAppName)
 }
 
-func (s *Rfc5424TestSuite) TestParseProcId_Valid(c *C) {
+func testParseProcId_Valid() {
 	buff := []byte("123foo ")
 	procId := "123foo"
 
-	s.assertParseProcId(c, procId, buff, 6, nil)
+	assertParseProcId(procId, buff, 6, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseProcId_TooLong(c *C) {
+func testParseProcId_TooLong() {
 	// > 128chars
 	buff := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab ")
 	procId := ""
 
-	s.assertParseProcId(c, procId, buff, 128, ErrInvalidProcId)
+	assertParseProcId(procId, buff, 128, ErrInvalidProcId)
 }
 
-func (s *Rfc5424TestSuite) TestParseMsgId_Valid(c *C) {
+func testParseMsgId_Valid() {
 	buff := []byte("123foo ")
 	procId := "123foo"
 
-	s.assertParseMsgId(c, procId, buff, 6, nil)
+	assertParseMsgId(procId, buff, 6, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseMsgId_TooLong(c *C) {
+func testParseMsgId_TooLong() {
 	// > 32chars
 	buff := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ")
 	procId := ""
 
-	s.assertParseMsgId(c, procId, buff, 32, ErrInvalidMsgId)
+	assertParseMsgId(procId, buff, 32, ErrInvalidMsgId)
 }
 
-func (s *Rfc5424TestSuite) TestParseStructuredData_NilValue(c *C) {
+func testParseStructuredData_NilValue() {
 	// > 32chars
 	buff := []byte("-")
 	sdData := "-"
 
-	s.assertParseSdName(c, sdData, buff, 1, nil)
+	assertParseSdName(sdData, buff, 1, nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseStructuredData_SingleStructuredData(c *C) {
+func testParseStructuredData_SingleStructuredData() {
 	sdData := `[exampleSDID@32473 iut="3" eventSource="Application"eventID="1011"]`
 	buff := []byte(sdData)
 
-	s.assertParseSdName(c, sdData, buff, len(buff), nil)
+	assertParseSdName(sdData, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseStructuredData_MultipleStructuredData(c *C) {
+func testParseStructuredData_MultipleStructuredData() {
 	sdData := `[exampleSDID@32473 iut="3" eventSource="Application"eventID="1011"][examplePriority@32473 class="high"]`
 	buff := []byte(sdData)
 
-	s.assertParseSdName(c, sdData, buff, len(buff), nil)
+	assertParseSdName(sdData, buff, len(buff), nil)
 }
 
-func (s *Rfc5424TestSuite) TestParseStructuredData_MultipleStructuredDataInvalid(c *C) {
+func testParseStructuredData_MultipleStructuredDataInvalid() {
 	a := `[exampleSDID@32473 iut="3" eventSource="Application"eventID="1011"]`
 	sdData := a + ` [examplePriority@32473 class="high"]`
 	buff := []byte(sdData)
 
-	s.assertParseSdName(c, a, buff, len(a), nil)
+	assertParseSdName(a, buff, len(a), nil)
 }
 
 // -------------
 
-func (s *Rfc5424TestSuite) BenchmarkParseTimestamp(c *C) {
+func BenchmarkParseTimestamp(b *testing.B) {
 	buff := []byte("2003-08-24T05:14:15.000003-07:00")
 
 	p := NewParser(buff)
 
-	for i := 0; i < c.N; i++ {
+	for i := 0; i < b.N; i++ {
 		_, err := p.parseTimestamp()
 		if err != nil {
 			panic(err)
@@ -787,12 +780,12 @@ func (s *Rfc5424TestSuite) BenchmarkParseTimestamp(c *C) {
 	}
 }
 
-func (s *Rfc5424TestSuite) BenchmarkParseHeader(c *C) {
+func BenchmarkParseHeader(b *testing.B) {
 	buff := []byte("<165>1 2003-10-11T22:14:15.003Z mymachine.example.com su 123 ID47")
 
 	p := NewParser(buff)
 
-	for i := 0; i < c.N; i++ {
+	for i := 0; i < b.N; i++ {
 		_, err := p.parseHeader()
 		if err != nil {
 			panic(err)
@@ -804,119 +797,188 @@ func (s *Rfc5424TestSuite) BenchmarkParseHeader(c *C) {
 
 // -------------
 
-func (s *Rfc5424TestSuite) assertTimestamp(c *C, ts time.Time, b []byte, expC int, e error) {
+func assertTimestamp(ts time.Time, b []byte, expC int, e error) {
 	p := NewParser(b)
 	obtained, err := p.parseTimestamp()
-	c.Assert(err, Equals, e)
+	expectError(err, e)
 
 	tFmt := time.RFC3339Nano
-	c.Assert(obtained.Format(tFmt), Equals, ts.Format(tFmt))
+	Expect(obtained.Format(tFmt)).To(Equal(ts.Format(tFmt)))
 
-	c.Assert(p.cursor, Equals, expC)
+	Expect(p.cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertFindNextSpace(c *C, nextSpace int, b []byte, e error) {
+func assertFindNextSpace(expC int, b []byte, e error) {
 	obtained, err := syslogparser.FindNextSpace(b, 0, len(b))
-	c.Assert(obtained, Equals, nextSpace)
-	c.Assert(err, Equals, e)
+	Expect(obtained).To(Equal(expC))
+	expectError(err, e)
 }
 
-func (s *Rfc5424TestSuite) assertParseYear(c *C, year int, b []byte, expC int, e error) {
+func assertParseYear(year int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseYear(b, &cursor, len(b))
-	c.Assert(obtained, Equals, year)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(year))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseMonth(c *C, month int, b []byte, expC int, e error) {
+func assertParseMonth(month int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseMonth(b, &cursor, len(b))
-	c.Assert(obtained, Equals, month)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(month))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseDay(c *C, day int, b []byte, expC int, e error) {
+func assertParseDay(day int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseDay(b, &cursor, len(b))
-	c.Assert(obtained, Equals, day)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(day))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseFullDate(c *C, fd fullDate, b []byte, expC int, e error) {
+func assertParseFullDate(fd fullDate, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseFullDate(b, &cursor, len(b))
-	c.Assert(err, Equals, e)
-	c.Assert(obtained, Equals, fd)
-	c.Assert(cursor, Equals, expC)
+	expectError(err, e)
+	Expect(obtained).To(Equal(fd))
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseHour(c *C, hour int, b []byte, expC int, e error) {
+func assertParseHour(hour int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseHour(b, &cursor, len(b))
-	c.Assert(obtained, Equals, hour)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(hour))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseMinute(c *C, minute int, b []byte, expC int, e error) {
+func assertParseMinute(minute int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseMinute(b, &cursor, len(b))
-	c.Assert(obtained, Equals, minute)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(minute))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseSecond(c *C, second int, b []byte, expC int, e error) {
+func assertParseSecond(second int, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseSecond(b, &cursor, len(b))
-	c.Assert(obtained, Equals, second)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(second))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseSecFrac(c *C, secFrac float64, b []byte, expC int, e error) {
+func assertParseSecFrac(secFrac float64, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseSecFrac(b, &cursor, len(b))
-	c.Assert(obtained, Equals, secFrac)
-	c.Assert(err, Equals, e)
-	c.Assert(cursor, Equals, expC)
+	Expect(obtained).To(Equal(secFrac))
+	expectError(err, e)
+	Expect(cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseAppName(c *C, appName string, b []byte, expC int, e error) {
+func assertParseAppName(appName string, b []byte, expC int, e error) {
 	p := NewParser(b)
 	obtained, err := p.parseAppName()
 
-	c.Assert(err, Equals, e)
-	c.Assert(obtained, Equals, appName)
-	c.Assert(p.cursor, Equals, expC)
+	expectError(err, e)
+	Expect(obtained).To(Equal(appName))
+	Expect(p.cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseProcId(c *C, procId string, b []byte, expC int, e error) {
+func assertParseProcId(procId string, b []byte, expC int, e error) {
 	p := NewParser(b)
 	obtained, err := p.parseProcId()
 
-	c.Assert(err, Equals, e)
-	c.Assert(obtained, Equals, procId)
-	c.Assert(p.cursor, Equals, expC)
+	expectError(err, e)
+	Expect(obtained).To(Equal(procId))
+	Expect(p.cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseMsgId(c *C, msgId string, b []byte, expC int, e error) {
+func assertParseMsgId(msgId string, b []byte, expC int, e error) {
 	p := NewParser(b)
 	obtained, err := p.parseMsgId()
 
-	c.Assert(err, Equals, e)
-	c.Assert(obtained, Equals, msgId)
-	c.Assert(p.cursor, Equals, expC)
+	expectError(err, e)
+	Expect(obtained).To(Equal(msgId))
+	Expect(p.cursor).To(Equal(expC))
 }
 
-func (s *Rfc5424TestSuite) assertParseSdName(c *C, sdData string, b []byte, expC int, e error) {
+func assertParseSdName(sdData string, b []byte, expC int, e error) {
 	cursor := 0
 	obtained, err := parseStructuredData(b, &cursor, len(b))
 
-	c.Assert(err, Equals, e)
-	c.Assert(obtained, Equals, sdData)
-	c.Assert(cursor, Equals, expC)
+	expectError(err, e)
+	Expect(obtained).To(Equal(sdData))
+	Expect(cursor).To(Equal(expC))
 }
+
+func expectError(obtained error, expected error) {
+	if expected == nil {
+		Expect(obtained).To(BeNil())
+		return
+	}
+	Expect(obtained).To(Equal(expected))
+}
+
+var _ = Describe("RFC5424 parser", func() {
+	It("parser valid", testParser_Valid)
+	It("parser truncated", testParser_Truncated)
+	It("parse header valid", testParseHeader_Valid)
+	It("parse header invalid proc id", testParseHeader_InvalidProcID)
+	It("parse header invalid msg id", testParseHeader_InvalidMsgID)
+	It("parse timestamp utc", testParseTimestamp_UTC)
+	It("parse timestamp numeric timezone", testParseTimestamp_NumericTimezone)
+	It("parse timestamp milli seconds", testParseTimestamp_MilliSeconds)
+	It("parse timestamp micro seconds", testParseTimestamp_MicroSeconds)
+	It("parse timestamp nano seconds", testParseTimestamp_NanoSeconds)
+	It("parse timestamp nil value", testParseTimestamp_NilValue)
+	It("parse timestamp empty", testParseTimestamp_Empty)
+	It("find next space no space", testFindNextSpace_NoSpace)
+	It("find next space space found", testFindNextSpace_SpaceFound)
+	It("parse year invalid", testParseYear_Invalid)
+	It("parse year too short", testParseYear_TooShort)
+	It("parse year valid", testParseYear_Valid)
+	It("parse month invalid string", testParseMonth_InvalidString)
+	It("parse month invalid range", testParseMonth_InvalidRange)
+	It("parse month too short", testParseMonth_TooShort)
+	It("parse month valid", testParseMonth_Valid)
+	It("parse day invalid string", testParseDay_InvalidString)
+	It("parse day too short", testParseDay_TooShort)
+	It("parse day invalid range", testParseDay_InvalidRange)
+	It("parse day valid", testParseDay_Valid)
+	It("parse full date invalid", testParseFullDate_Invalid)
+	It("parse full date valid", testParseFullDate_Valid)
+	It("parse hour invalid string", testParseHour_InvalidString)
+	It("parse hour too short", testParseHour_TooShort)
+	It("parse hour invalid range", testParseHour_InvalidRange)
+	It("parse hour valid", testParseHour_Valid)
+	It("parse minute invalid string", testParseMinute_InvalidString)
+	It("parse minute too short", testParseMinute_TooShort)
+	It("parse minute invalid range", testParseMinute_InvalidRange)
+	It("parse minute valid", testParseMinute_Valid)
+	It("parse second invalid string", testParseSecond_InvalidString)
+	It("parse second too short", testParseSecond_TooShort)
+	It("parse second invalid range", testParseSecond_InvalidRange)
+	It("parse second valid", testParseSecond_Valid)
+	It("parse sec frac invalid string", testParseSecFrac_InvalidString)
+	It("parse sec frac nano seconds", testParseSecFrac_NanoSeconds)
+	It("parse sec frac valid", testParseSecFrac_Valid)
+	It("parse numerical time offset valid", testParseNumericalTimeOffset_Valid)
+	It("parse time offset valid", testParseTimeOffset_Valid)
+	It("get hour min valid", testGetHourMin_Valid)
+	It("parse partial time valid", testParsePartialTime_Valid)
+	It("parse full time valid", testParseFullTime_Valid)
+	It("to nsec", testToNSec)
+	It("parse app name valid", testParseAppName_Valid)
+	It("parse app name too long", testParseAppName_TooLong)
+	It("parse proc id valid", testParseProcId_Valid)
+	It("parse proc id too long", testParseProcId_TooLong)
+	It("parse msg id valid", testParseMsgId_Valid)
+	It("parse msg id too long", testParseMsgId_TooLong)
+	It("parse structured data nil value", testParseStructuredData_NilValue)
+	It("parse structured data single structured data", testParseStructuredData_SingleStructuredData)
+	It("parse structured data multiple structured data", testParseStructuredData_MultipleStructuredData)
+	It("parse structured data multiple structured data invalid", testParseStructuredData_MultipleStructuredDataInvalid)
+})

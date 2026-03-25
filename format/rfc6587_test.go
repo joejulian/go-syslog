@@ -6,84 +6,81 @@ import (
 	"fmt"
 	"strings"
 
-	. "gopkg.in/check.v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func (s *FormatSuite) TestRFC6587_GetSplitFuncSingleSplit(c *C) {
-	f := RFC6587{}
+var _ = Describe("RFC6587", func() {
+	It("splits a single octet-counted frame", func() {
+		f := RFC6587{}
 
-	buf := strings.NewReader("10 I am test.")
-	scanner := bufio.NewScanner(buf)
-	scanner.Split(f.GetSplitFunc())
+		buf := strings.NewReader("10 I am test.")
+		scanner := bufio.NewScanner(buf)
+		scanner.Split(f.GetSplitFunc())
 
-	r := scanner.Scan()
-	c.Assert(r, NotNil)
-	c.Assert(scanner.Text(), Equals, "I am test.")
-}
+		Expect(scanner.Scan()).To(BeTrue())
+		Expect(scanner.Text()).To(Equal("I am test."))
+	})
 
-func (s *FormatSuite) TestRFC6587_GetSplitFuncMultiSplit(c *C) {
-	f := RFC6587{}
+	It("splits multiple octet-counted frames", func() {
+		f := RFC6587{}
 
-	find := []string{
-		"I am test.",
-		"I am test 2.",
-		"hahahahah",
-	}
-	buf := new(bytes.Buffer)
-	for _, i := range find {
-		fmt.Fprintf(buf, "%d %s", len(i), i)
-	}
-	scanner := bufio.NewScanner(buf)
-	scanner.Split(f.GetSplitFunc())
+		frames := []string{
+			"I am test.",
+			"I am test 2.",
+			"hahahahah",
+		}
+		buf := new(bytes.Buffer)
+		for _, frame := range frames {
+			fmt.Fprintf(buf, "%d %s", len(frame), frame)
+		}
+		scanner := bufio.NewScanner(buf)
+		scanner.Split(f.GetSplitFunc())
 
-	i := 0
-	for scanner.Scan() {
-		c.Assert(scanner.Text(), Equals, find[i])
-		i++
-	}
+		i := 0
+		for scanner.Scan() {
+			Expect(scanner.Text()).To(Equal(frames[i]))
+			i++
+		}
 
-	c.Assert(i, Equals, len(find))
-}
+		Expect(i).To(Equal(len(frames)))
+	})
 
-func (s *FormatSuite) TestRFC6587_GetSplitFuncMultiSplitNonTransparentFraming(c *C) {
-	f := RFC6587{}
+	It("treats non-transparent framing as a single frame", func() {
+		f := RFC6587{}
 
-	find := []string{
-		"<1> I am a test.",
-		"<2> I am a test 2.",
-		"<3> hahahah",
-	}
-	buf := new(bytes.Buffer)
-	for _, i := range find {
-		fmt.Fprintf(buf, "%s", i)
-	}
-	scanner := bufio.NewScanner(buf)
-	scanner.Split(f.GetSplitFunc())
+		frames := []string{
+			"<1> I am a test.",
+			"<2> I am a test 2.",
+			"<3> hahahah",
+		}
+		buf := new(bytes.Buffer)
+		for _, frame := range frames {
+			fmt.Fprintf(buf, "%s", frame)
+		}
+		scanner := bufio.NewScanner(buf)
+		scanner.Split(f.GetSplitFunc())
 
-	i := 0
-	for scanner.Scan() {
-		c.Assert(scanner.Text(), Equals, strings.Join(find, ""))
-		i++
-	}
+		i := 0
+		for scanner.Scan() {
+			Expect(scanner.Text()).To(Equal(strings.Join(frames, "")))
+			i++
+		}
 
-	c.Assert(i, Equals, 1)
-}
+		Expect(i).To(Equal(1))
+	})
 
-func (s *FormatSuite) TestRFC6587_GetSplitBadSplit(c *C) {
-	f := RFC6587{}
+	It("returns an error when the octet count is invalid", func() {
+		f := RFC6587{}
 
-	find := "I am test.2 ab"
-	buf := strings.NewReader("9 " + find)
-	scanner := bufio.NewScanner(buf)
-	scanner.Split(f.GetSplitFunc())
+		find := "I am test.2 ab"
+		buf := strings.NewReader("9 " + find)
+		scanner := bufio.NewScanner(buf)
+		scanner.Split(f.GetSplitFunc())
 
-	r := scanner.Scan()
-	c.Assert(r, NotNil)
-	c.Assert(scanner.Text(), Equals, find[0:9])
-
-	r = scanner.Scan()
-	c.Assert(r, NotNil)
-
-	err := scanner.Err()
-	c.Assert(err, ErrorMatches, "strconv.*: parsing \".2\": invalid syntax")
-}
+		Expect(scanner.Scan()).To(BeTrue())
+		Expect(scanner.Text()).To(Equal(find[0:9]))
+		scanner.Scan()
+		Expect(scanner.Err()).To(MatchError(MatchRegexp("invalid syntax")))
+	})
+})

@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,5 +20,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+      - run: go clean -cache -testcache
+      - run: go build ./...
+      - run: go tool golangci-lint run
       - run: go test ./...
       - run: go test -race ./...
