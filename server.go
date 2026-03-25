@@ -22,6 +22,7 @@ var (
 const (
 	datagramChannelBufferSize = 10
 	datagramReadBufferSize    = 64 * 1024
+	streamScanBufferSize      = 1024 * 1024
 )
 
 // A function type which gets the TLS peer name from the connection. Can return
@@ -41,6 +42,7 @@ type Server struct {
 	lastError               error
 	lastErrorMu             sync.RWMutex
 	readTimeoutMilliseconds int64
+	scanBufferSize          int
 	tlsPeerNameFunc         TlsPeerNameFunc
 	datagramPool            sync.Pool
 }
@@ -54,6 +56,7 @@ func NewServer() *Server {
 	},
 
 		datagramChannelSize: datagramChannelBufferSize,
+		scanBufferSize:      streamScanBufferSize,
 	}
 }
 
@@ -79,6 +82,10 @@ func (s *Server) SetTlsPeerNameFunc(tlsPeerNameFunc TlsPeerNameFunc) {
 
 func (s *Server) SetDatagramChannelSize(size int) {
 	s.datagramChannelSize = size
+}
+
+func (s *Server) SetScanBufferSize(size int) {
+	s.scanBufferSize = size
 }
 
 // Default TLS peer name function - returns the CN of the certificate
@@ -211,6 +218,7 @@ func (s *Server) goAcceptConnection(listener net.Listener) {
 
 func (s *Server) goScanConnection(connection net.Conn) {
 	scanner := bufio.NewScanner(connection)
+	scanner.Buffer(make([]byte, 0, 64*1024), s.scanBufferSize)
 	if sf := s.format.GetSplitFunc(); sf != nil {
 		scanner.Split(sf)
 	}
@@ -259,6 +267,11 @@ loop:
 		if scanCloser.Scan() {
 			s.parser([]byte(scanCloser.Text()), client, tlsPeer)
 		} else {
+			if err := scanCloser.Err(); err != nil {
+				if !isIgnorableScanError(err) {
+					s.emitParseFailure(nil, client, tlsPeer, err)
+				}
+			}
 			break loop
 		}
 	}
@@ -277,6 +290,10 @@ func (s *Server) parser(line []byte, client string, tlsPeer string) {
 	}
 
 	logParts := parser.Dump()
+	logParts["raw"] = string(line)
+	if err != nil {
+		logParts["parse_error"] = err.Error()
+	}
 	logParts["client"] = client
 	if logParts["hostname"] == "" && (s.format == RFC3164 || s.format == Automatic) {
 		if i := strings.Index(client, ":"); i > 1 {
@@ -284,10 +301,34 @@ func (s *Server) parser(line []byte, client string, tlsPeer string) {
 		} else {
 			logParts["hostname"] = client
 		}
+		logParts["hostname_inferred"] = true
 	}
 	logParts["tls_peer"] = tlsPeer
 
 	s.handler.Handle(logParts, int64(len(line)), err)
+}
+
+func (s *Server) emitParseFailure(line []byte, client string, tlsPeer string, err error) {
+	logParts := format.LogParts{
+		"client":      client,
+		"parse_error": err.Error(),
+		"raw":         string(line),
+		"tls_peer":    tlsPeer,
+	}
+	if i := strings.Index(client, ":"); i > 1 {
+		logParts["hostname"] = client[:i]
+		logParts["hostname_inferred"] = true
+	}
+
+	s.handler.Handle(logParts, int64(len(line)), err)
+}
+
+func isIgnorableScanError(err error) bool {
+	if netErr, ok := err.(net.Error); ok && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+
+	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
 // Returns the last error

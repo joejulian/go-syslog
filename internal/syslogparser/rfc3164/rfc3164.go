@@ -9,15 +9,18 @@ import (
 )
 
 type Parser struct {
-	buff     []byte
-	cursor   int
-	l        int
-	priority syslogparser.Priority
-	version  int
-	header   header
-	message  rfc3164message
-	location *time.Location
-	skipTag  bool
+	buff              []byte
+	cursor            int
+	l                 int
+	priority          syslogparser.Priority
+	version           int
+	header            header
+	message           rfc3164message
+	location          *time.Location
+	skipTag           bool
+	priorityInferred  bool
+	timestampInferred bool
+	hostnameInferred  bool
 }
 
 type header struct {
@@ -49,9 +52,11 @@ func (p *Parser) Parse() error {
 	if err != nil {
 		// RFC3164 sec 4.3.3
 		p.priority = syslogparser.Priority{13, syslogparser.Facility{Value: 1}, syslogparser.Severity{Value: 5}}
+		p.priorityInferred = true
 		p.cursor = tcursor
 		content, err := p.parseContent()
 		p.header.timestamp = time.Now().Round(time.Second)
+		p.timestampInferred = true
 		if err != syslogparser.ErrEOL {
 			return err
 		}
@@ -64,6 +69,7 @@ func (p *Parser) Parse() error {
 	if err == syslogparser.ErrTimestampUnknownFormat {
 		// RFC3164 sec 4.3.2.
 		hdr.timestamp = time.Now().Round(time.Second)
+		p.timestampInferred = true
 		// No tag processing should be done
 		p.skipTag = true
 		// Reset cursor for content read
@@ -88,7 +94,7 @@ func (p *Parser) Parse() error {
 }
 
 func (p *Parser) Dump() syslogparser.LogParts {
-	return syslogparser.LogParts{
+	logParts := syslogparser.LogParts{
 		"timestamp": p.header.timestamp,
 		"hostname":  p.header.hostname,
 		"tag":       p.message.tag,
@@ -97,6 +103,17 @@ func (p *Parser) Dump() syslogparser.LogParts {
 		"facility":  p.priority.F.Value,
 		"severity":  p.priority.S.Value,
 	}
+	if p.priorityInferred {
+		logParts["priority_inferred"] = true
+	}
+	if p.timestampInferred {
+		logParts["timestamp_inferred"] = true
+	}
+	if p.hostnameInferred {
+		logParts["hostname_inferred"] = true
+	}
+
+	return logParts
 }
 
 func (p *Parser) parsePriority() (syslogparser.Priority, error) {
@@ -211,6 +228,7 @@ func (p *Parser) parseHostname() (string, error) {
 		p.cursor = oldcursor - 1
 		myhostname, err := os.Hostname()
 		if err == nil {
+			p.hostnameInferred = true
 			return myhostname, nil
 		}
 		return "", nil

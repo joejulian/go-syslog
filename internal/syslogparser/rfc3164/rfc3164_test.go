@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	. "gopkg.in/check.v1"
 	"github.com/joejulian/go-syslog/v2/internal/syslogparser"
+	. "gopkg.in/check.v1"
 )
 
 // Hooks up gocheck into the gotest runner.
@@ -113,13 +113,14 @@ func (s *Rfc3164TestSuite) TestParser_NoTimestamp(c *C) {
 
 	obtained["timestamp"] = now // XXX: Need to mock out time to test this fully
 	expected := syslogparser.LogParts{
-		"timestamp": now,
-		"hostname":  "",
-		"tag":       "",
-		"content":   "INFO     leaving (1) step postscripts",
-		"priority":  14,
-		"facility":  1,
-		"severity":  6,
+		"timestamp":          now,
+		"timestamp_inferred": true,
+		"hostname":           "",
+		"tag":                "",
+		"content":            "INFO     leaving (1) step postscripts",
+		"priority":           14,
+		"facility":           1,
+		"severity":           6,
 	}
 
 	c.Assert(obtained, DeepEquals, expected)
@@ -150,13 +151,15 @@ func (s *Rfc3164TestSuite) TestParser_NoPriority(c *C) {
 
 	obtained["timestamp"] = now // XXX: Need to mock out time to test this fully
 	expected := syslogparser.LogParts{
-		"timestamp": now,
-		"hostname":  "",
-		"tag":       "",
-		"content":   "Oct 11 22:14:15 Testing no priority",
-		"priority":  13,
-		"facility":  1,
-		"severity":  5,
+		"timestamp":          now,
+		"timestamp_inferred": true,
+		"hostname":           "",
+		"tag":                "",
+		"content":            "Oct 11 22:14:15 Testing no priority",
+		"priority":           13,
+		"priority_inferred":  true,
+		"facility":           1,
+		"severity":           5,
 	}
 
 	c.Assert(obtained, DeepEquals, expected)
